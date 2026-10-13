@@ -113,3 +113,16 @@ describe.skipIf(!ready)('a real battle', () => {
     expect(await audit(db, {site, fetch: fakeFetch, load}, () => {})).toEqual({confirmed: 0, corrected: 0, skipped: 0}); // nothing pending
   }, 300_000);
 });
+
+describe('audit before the first deploy of this version', () => {
+  it('does nothing while the database has no verified column', async () => {
+    const {DatabaseSync} = createRequire(import.meta.url)('node:sqlite');
+    const sql = new DatabaseSync(':memory:');
+    sql.exec(`CREATE TABLE runs (player_id TEXT, day INTEGER, finished_at INTEGER, won INTEGER, turns INTEGER, alive INTEGER, log TEXT)`);
+    const db: Db = {async all(q) { return sql.prepare(q).all(); }};
+    const lines: string[] = [];
+    const out = await audit(db, {site: 'https://example.test', fetch, load: async () => null}, s => lines.push(s));
+    expect(out).toEqual({confirmed: 0, corrected: 0, skipped: 0});
+    expect(lines[0]).toMatch(/no verified column/);
+  });
+});

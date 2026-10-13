@@ -11,7 +11,14 @@ type Deps = {site: string; fetch: typeof fetch; load: () => Promise<any>; replay
 /** Replays pending wins; returns how many were confirmed, corrected, or left alone (ROM changed since they were played). */
 export async function audit(db: Db, {site, fetch, load, replayFn = replay, batch = 10}: Deps, log: (s: string) => void = console.log) {
   const out = {confirmed: 0, corrected: 0, skipped: 0};
-  const rows = await db.all(`SELECT player_id, day, log FROM runs WHERE won = 1 AND verified = 0 AND log IS NOT NULL ORDER BY finished_at LIMIT ${batch}`);
+  let rows: any[];
+  try {
+    rows = await db.all(`SELECT player_id, day, log FROM runs WHERE won = 1 AND verified = 0 AND log IS NOT NULL ORDER BY finished_at LIMIT ${batch}`);
+  } catch (e) {
+    // The Worker adds this column on its first request after a deploy; until then there is nothing to audit.
+    if (/no such column: verified/.test(String(e))) { log('audit: no verified column yet (the Worker creates it on its first request after a deploy), nothing to do'); return out; }
+    throw e;
+  }
   if (!rows.length) return out;
   const get = async (path: string) => { const r = await fetch(site + path); if (!r.ok) throw new Error(`${path}: ${r.status}`); return r; };
   const rom = new Uint8Array(await (await get('/rom/oakle.gbc')).arrayBuffer());

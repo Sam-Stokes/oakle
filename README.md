@@ -10,6 +10,8 @@
   You get one try.
 </p>
 
+<h3 align="center"><a href="https://oakle.day">▶ Play at oakle.day</a></h3>
+
 ---
 
 ## What is Oakle?
