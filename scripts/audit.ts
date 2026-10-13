@@ -8,7 +8,7 @@ import {decodeLog, patchRom, replay, romId, type Day, type Result} from '../src/
 export type Db = {all(sql: string, params?: string[]): Promise<any[]>};
 type Deps = {site: string; fetch: typeof fetch; load: () => Promise<any>; replayFn?: typeof replay; batch?: number};
 
-/** Replays pending wins; returns how many were confirmed, corrected, or left alone (ROM changed since they were played). */
+/** Replays pending wins; returns how many were confirmed, voided (`corrected`), or left alone (ROM changed since they were played). */
 export async function audit(db: Db, {site, fetch, load, replayFn = replay, batch = 10}: Deps, log: (s: string) => void = console.log) {
   const out = {confirmed: 0, corrected: 0, skipped: 0};
   let rows: any[];
@@ -42,9 +42,11 @@ export async function audit(db: Db, {site, fetch, load, replayFn = replay, batch
     if (res?.won) { // the game itself says it was a win; its numbers replace the claimed ones
       await db.all(`UPDATE runs SET turns = ${res.turns | 0}, alive = ${res.alive | 0}, verified = 1, log = NULL ${where}`, [row.player_id]);
       out.confirmed++; log(`day ${day} ${who}: confirmed, ${res.turns} turns`);
-    } else { // not reproduced: a loss, with whatever the game itself ended with. The evidence stays on the row.
-      await db.all(`UPDATE runs SET won = 0, turns = ${(res?.turns ?? 0) | 0}, alive = ${(res?.alive ?? 0) | 0}, verified = 1 ${where}`, [row.player_id]);
-      out.corrected++; log(`day ${day} ${who}: CORRECTED to a loss (${res ? 'the replay lost' : 'the replay never finished'})`);
+    } else {
+      // Not a win on replay: it stops counting. It is never turned into a loss (void: counted as neither). The evidence
+      // stays on the row, and verified = 3 is what the page and the Worker read as "void".
+      await db.all(`UPDATE runs SET finished_at = NULL, won = NULL, turns = NULL, alive = NULL, verified = 3 ${where}`, [row.player_id]);
+      out.corrected++; log(`day ${day} ${who}: VOIDED (${res ? 'the replay was not a win' : 'the replay never finished'})`);
     }
   }
   return out;

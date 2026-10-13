@@ -5,9 +5,9 @@ import {encodeLog, patchRom, readResult, romId, type Day as RomDay} from './rom'
 
 type Mon = {species: string; moves: string[]};
 type Day = RomDay & {team: Mon[]};
-// log/romName: the replay evidence for a finished battle, kept until the server has accepted it. rejected: the server's
-// replay did not reproduce the win, so it was recorded as a loss.
-type Run = {started?: boolean; done?: boolean; won?: boolean; turns?: number; alive?: number; late?: boolean; synced?: boolean; forfeit?: boolean; log?: string; romName?: string; romId?: string; rejected?: boolean};
+// log/romName/romId: the replay evidence for a finished battle, kept until the server has accepted it. voided: the
+// battle does not count (finished after its day ended, or not verifiable): neither a win nor a loss.
+type Run = {started?: boolean; done?: boolean; won?: boolean; turns?: number; alive?: number; late?: boolean; synced?: boolean; forfeit?: boolean; log?: string; romName?: string; romId?: string; voided?: boolean};
 type Save = {id: string; name: string; runs: Record<number, Run>};
 
 // ?test (optionally &day=N), localhost only: own save slot, no server, no one-try lock, for checking the ROM.
@@ -178,7 +178,7 @@ function renderHow() {
 }
 
 function stats() {
-  const done = Object.values(save.runs).filter(r => r.done);
+  const done = Object.values(save.runs).filter(r => r.done && !r.voided);
   const wins = done.filter(r => r.won);
   let streak = 0;
   for (let d = save.runs[current]?.done ? current : current - 1; save.runs[d]?.won && !save.runs[d].late; d--) streak++;
@@ -229,13 +229,13 @@ const updateCountdown = () => {
 function renderArchive() {
   const cells = Array.from({length: current}, (_, i) => {
     const n = current - i, r = save.runs[n];
-    const state = r?.done ? (r.won ? 'won' : 'lost') : 'open';
+    const state = r?.done && !r.voided ? (r.won ? 'won' : 'lost') : 'open';
     const label = `#${n}: ${state === 'open' ? 'not played' : state}`;
     return `<a class="cell ${state} ${n === day ? 'now' : ''}" href="?${TEST ? 'test&' : ''}day=${n}" aria-label="${label}" title="${label}">${n}</a>`;
   }).join('');
   const el = $<HTMLDetailsElement>('#archive');
   if (!el.dataset.init) { el.open = matchMedia('(min-width: 1020px)').matches; el.dataset.init = '1'; }
-  const played = Object.values(save.runs).filter(r => r.done).length;
+  const played = Object.values(save.runs).filter(r => r.done && !r.voided).length;
   el.innerHTML = `<summary><span>Archive <small>${played} of ${current} played</small></span></summary>
     <div class="cells">${cells}</div>
     <p class="muted">One try per day, even for past days. Archive wins count towards your total.</p>`;
@@ -298,7 +298,7 @@ async function main() {
   // merge the server's history (other devices, other browsers) into the local record
   try {
     const {data: me} = await api(`me?id=${save.id}`);
-    for (const r of me.runs ?? []) save.runs[r.day] = {...save.runs[r.day], done: true, won: !!r.won, turns: r.turns, alive: r.alive ?? undefined, late: !!r.late, started: true, synced: true};
+    for (const r of me.runs ?? []) save.runs[r.day] = {...save.runs[r.day], done: true, won: !!r.won, turns: r.turns, alive: r.alive ?? undefined, late: !!r.late, started: true, synced: true, voided: false, forfeit: false};
     persist();
   } catch (e) {
     if ((e as Error)?.message === 'signin') { overlay(`<p class="big">SIGN IN TO PLAY</p><p>THIS GAME IS PRIVATE</p><a class="ov-btn" href="/signin">SIGN IN</a>`); return; }
@@ -395,7 +395,7 @@ function ready(resume: boolean) {
     api('start', {id: save.id, name: save.name, day}).then(r => {
       if (r.status === 409) { // this day was already played from another device: stop and show that result
         haltGame();
-        Object.assign(run, {done: true, won: !!r.data.won, turns: r.data.turns ?? 0, alive: r.data.alive ?? undefined, forfeit: true, synced: true, started: true});
+        Object.assign(run, {done: true, won: !!r.data.won, turns: r.data.turns ?? 0, alive: r.data.alive ?? undefined, forfeit: true, synced: true, started: true, voided: !!r.data.void || !r.data.finished});
         persist(); result();
       } else { run.started = r.status === 200; persist(); }
     }).catch(() => { /* offline: the start is retried when the result is sent */ });
@@ -406,9 +406,9 @@ async function submit(run: Run) {
   try {
     if (!run.started) { const s = await api('start', {id: save.id, name: save.name, day}); run.started = s.status === 200 || s.status === 409; }
     const r = await api('finish', {id: save.id, day, won: !!run.won, turns: run.turns ?? 0, alive: run.alive ?? 0, name: run.romName, rom: run.romId, log: run.log});
-    if (r.status === 200) { // the server's replayed result is the one that counts
-      if (typeof r.data.won === 'boolean') Object.assign(run, {won: r.data.won, turns: r.data.turns, alive: r.data.alive});
-      if (r.data.rejected) Object.assign(run, {rejected: true, forfeit: true});
+    if (r.status === 200) { // the server's result is the one that counts
+      if (r.data.void) Object.assign(run, {voided: true, forfeit: true, won: false, turns: 0, alive: 0});
+      else if (typeof r.data.won === 'boolean') Object.assign(run, {won: r.data.won, turns: r.data.turns, alive: r.data.alive});
     }
     if (r.status === 200 || r.status === 409) { run.synced = true; delete run.log; delete run.romName; delete run.romId; persist(); }
   } catch { /* retried next load */ }
@@ -424,10 +424,10 @@ async function play(resume: boolean) {
       // player's fault, so the battle simply starts again on the new ROM.
       await emu.warm();
     } else {
-      if (!saved?.log || !emu.loadState(saved.state, saved.log)) { // the saved game is gone: that counts as a loss, no rerolls
+      if (!saved?.log || !emu.loadState(saved.state, saved.log)) { // the saved game is gone: the battle cannot be finished, so it does not count
         const run = save.runs[day];
-        Object.assign(run, {done: true, won: false, turns: 0, alive: 0, forfeit: true});
-        persist(); haltGame(); await submit(run); return result();
+        Object.assign(run, {done: true, voided: true, forfeit: true, synced: true, won: false, turns: 0, alive: 0});
+        persist(); haltGame(); return result();
       }
       emu.romName = saved.name; // the replay must use the name and ROM this game was started with
       emu.romId = saved.rom;
@@ -458,8 +458,8 @@ function result() {
   const run = save.runs[day];
   $('#console').dataset.on = 'false';
   const lost = run.forfeit && run.alive === undefined; // someone else (another device) already played this day
-  overlay(run.rejected
-    ? `<p class="big">NOT<br>VERIFIED</p><p class="dim">THE REPLAY DID NOT MATCH.<br>RECORDED AS A LOSS</p>`
+  overlay(run.voided
+    ? `<p class="big">NOT<br>COUNTED</p><p class="dim">THIS BATTLE WAS NOT FINISHED IN TIME<br>OR COULD NOT BE VERIFIED.<br>IT COUNTS AS NEITHER A WIN NOR A LOSS</p>`
     : lost
     ? `<p class="big">ALREADY<br>BATTLED</p><p class="dim">ONE TRY PER DAY</p>`
     : `<p class="big">${run.won ? 'YOU WON!' : 'OAK WINS'}</p><p>${run.turns} TURN${run.turns === 1 ? '' : 'S'} TAKEN</p>${run.alive != null ? `<p>${run.alive} POKEMON LEFT</p>` : ''}<p class="dim">${archive ? 'PICK ANOTHER DAY IN THE ARCHIVE' : 'COME BACK TOMORROW'}</p>`);

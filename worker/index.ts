@@ -1,17 +1,14 @@
 // API only; static files (page, ROM, emulator) are served by the assets binding in wrangler.toml.
 // ponytail: results are trusted from the client (private site, no server-side emulator replay).
 import {dayNumber} from '../src/day';
-import {decodeLog, withinClock} from '../src/rom';
+import {decodeLog} from '../src/rom';
 import {cleanCode, cleanName, isBlocked, makeCode, streaks} from './stats';
 import {verify} from './verify';
-import type {Result} from '../src/rom';
 
 const json = (o: unknown, status = 200) => new Response(JSON.stringify(o), {status, headers: {
   'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'strict-transport-security': 'max-age=31536000',
 }});
 const ID = /^[0-9a-f-]{16,64}$/;
-const MIN_BATTLE_MS = 20_000; // a real fight takes longer than this
-const MS_PER_TURN = 1_500;    // and each turn takes at least this long
 const TOP = 20;
 const PAIR_TTL_MS = 10 * 60_000;
 const MAX_BODY = 2048;
@@ -187,48 +184,54 @@ export default {
         const ins = await db.prepare(`INSERT OR IGNORE INTO runs (player_id, day, started_at, late) VALUES (?, ?, ?, ?)`)
           .bind(body.id, day, now, day < current ? 1 : 0).run();
         if (ins.meta.changes) return json({ok: true});
-        const r = await db.prepare(`SELECT won, turns, alive, finished_at FROM runs WHERE player_id = ? AND day = ?`).bind(body.id, day).first();
-        return json({ok: false, finished: r.finished_at != null, won: r.won, turns: r.turns, alive: r.alive}, 409);
+        const r = await db.prepare(`SELECT won, turns, alive, finished_at, verified FROM runs WHERE player_id = ? AND day = ?`).bind(body.id, day).first();
+        return json({ok: false, finished: r.finished_at != null, void: r.verified === 3, won: r.won, turns: r.turns, alive: r.alive}, 409);
       }
 
       if (url.pathname === '/api/finish') {
-        const r = await db.prepare(`SELECT started_at, finished_at FROM runs WHERE player_id = ? AND day = ?`).bind(body.id, day).first();
+        const r = await db.prepare(`SELECT started_at, finished_at, verified FROM runs WHERE player_id = ? AND day = ?`).bind(body.id, day).first();
         if (!r || r.finished_at != null) return json({error: 'no open run'}, 409);
+        if (r.verified === 3) return json({void: true});
         const turns = Number(body.turns), alive = Number(body.alive ?? 0);
         if (typeof body.won !== 'boolean' || !Number.isInteger(turns) || turns < 0 || turns > 255 || !Number.isInteger(alive) || alive < 0 || alive > 5)
           return json({error: 'bad result'}, 400);
-        // forfeits (turns 0) are always accepted; real results must be possible: a win needs 5 knockouts and at least
-        // one Pokemon left, a loss leaves none, and every turn takes real time (animations, text)
-        if (turns > 0) {
-          if (body.won ? turns < 5 || alive < 1 : alive !== 0) return json({error: 'inconsistent result'}, 400);
-          if (now - r.started_at < Math.max(MIN_BATTLE_MS, turns * MS_PER_TURN)) return json({error: 'too fast'}, 400);
-        }
-        // A claimed win needs its input log. VERIFY = "1" replays it right here (needs Workers Paid); VERIFY = "audit"
-        // accepts it now and leaves the replay to scripts/audit.ts, which corrects it within minutes (free).
-        // What the replay says is what the game itself did; anything that does not reproduce is recorded as a loss.
-        // runs.log holds the evidence: {name, rom, log} while a win awaits audit, or after a rejection. runs.verified:
-        // 0 awaiting audit, 1 replayed, 2 could not be audited, null nothing to check.
-        let verdict = {won: body.won as boolean, turns, alive}, rejected = false, evidence: string | null = null, verified: number | null = null;
+
+        // Only real results count. A run is a win, a loss, or VOID (still "unfinished", so it counts nowhere), and a win
+        // is never turned into a loss. runs.verified: 0 win awaiting audit, 1 replayed, 2 could not be audited,
+        // 3 void, null nothing to check. runs.log holds the evidence {name, rom, log} for 0 and 3.
+        const voidRun = async (evidence: string | null = null) => {
+          await db.prepare(`UPDATE runs SET verified = 3, log = ? WHERE player_id = ? AND day = ?`).bind(evidence, body.id, day).run();
+          boards.clear();
+          return json({void: true});
+        };
+        // one try, one day: a battle that was not finished before the day it was started on ended does not count
+        if (dayNumber(new Date(r.started_at)) !== current) return voidRun();
+        // not something the game can produce: a win needs 5 knockouts and a survivor, a loss leaves none, no turns is no battle
+        if (turns === 0 || (body.won ? turns < 5 || alive < 1 : alive !== 0)) return voidRun();
+
+        let verdict = {won: body.won as boolean, turns, alive}, evidence: string | null = null, verified: number | null = null;
         const mode = env.VERIFY;
         if (body.won && (mode === '1' || mode === 'audit')) {
+          // A claimed win needs its input log, and what the replay says is what the game itself did.
+          // VERIFY = "1" replays it here (needs Workers Paid); "audit" accepts it now and scripts/audit.ts replays it.
           const proof = JSON.stringify({name: cleanName(body.name), rom: String(body.rom ?? '').slice(0, 32), log: body.log});
-          let v: Result | null | 'stale' | undefined;
           if (mode === '1') {
             if (await limited(db, `finish:${ip}`, 6)) return json({error: 'slow down'}, 429);
-            v = await verify(env.ASSETS, url.origin, day, cleanName(body.name), body.log, now - r.started_at, body.rom)
+            const v = await verify(env.ASSETS, url.origin, day, cleanName(body.name), body.log, body.rom)
               .catch((e) => { console.error('replay error', e); return undefined; });
             if (v === undefined) return json({error: 'verification unavailable'}, 503); // our fault: leave the run open, the page retries
+            if (v === null || (v !== 'stale' && v !== 'defer' && !v.won)) return voidRun(proof);
+            if (v === 'defer') { verified = 0; evidence = proof; } // too long for the Worker: the audit job takes it
+            else if (v !== 'stale') { verdict = v; verified = 1; }
           } else {
-            const events = decodeLog(body.log); // cheap: shape and clock only, the replay itself runs in the audit job
-            if (events && withinClock(events, now - r.started_at)) { verified = 0; evidence = proof; v = 'stale'; } else v = null;
+            if (!decodeLog(body.log)?.length) return voidRun(proof);
+            verified = 0; evidence = proof;
           }
-          if (v === null) { verdict = {won: false, turns: 0, alive: 0}; rejected = true; evidence = proof; }
-          else if (v !== 'stale') { verdict = v; verified = 1; }
         }
         await db.prepare(`UPDATE runs SET finished_at = ?, won = ?, turns = ?, alive = ?, log = ?, verified = ? WHERE player_id = ? AND day = ?`)
           .bind(now, verdict.won ? 1 : 0, verdict.turns, verdict.alive, evidence, verified, body.id, day).run();
         boards.clear();
-        return json({...verdict, rejected});
+        return json(verdict);
       }
       return json({error: 'not found'}, 404);
     } catch (e) {

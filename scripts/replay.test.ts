@@ -98,14 +98,13 @@ describe.skipIf(!ready)('a real battle', () => {
     add('liar2', {...proof, name: 'OTHER'});         // a second row on a different ROM patch: every replay needs its own module
     add('garbage', {...proof, log: 'not base64!'});  // malformed evidence
     add('oldrom', {...proof, rom: 'deadbeefdeadbeef'}); // played on another build: cannot be judged
-    const row = (p: string) => sql.prepare(`SELECT won, turns, alive, verified, log IS NULL AS nolog FROM runs WHERE player_id = ?`).get(p);
+    const row = (p: string) => sql.prepare(`SELECT finished_at, won, turns, alive, verified, log IS NULL AS nolog FROM runs WHERE player_id = ?`).get(p);
 
     const out = await audit(db, {site, fetch: fakeFetch, load}, () => {});
     expect(out).toEqual({confirmed: 0, corrected: 3, skipped: 1});
-    expect(row('liar')).toMatchObject({won: 0, turns: live!.turns, alive: live!.alive, verified: 1, nolog: 0});
-    expect(row('liar2')).toMatchObject({won: 0, turns: live!.turns, alive: live!.alive, verified: 1}); // a reused module would give turns 0
-    expect(row('garbage')).toMatchObject({won: 0, turns: 0, alive: 0, verified: 1});
-    expect(row('oldrom')).toMatchObject({won: 1, verified: 2});
+    // not a win on replay: void (unfinished, counted nowhere), never turned into a loss, evidence kept
+    for (const p of ['liar', 'liar2', 'garbage']) expect(row(p), p).toMatchObject({finished_at: null, won: null, turns: null, alive: null, verified: 3, nolog: 0});
+    expect(row('oldrom')).toMatchObject({won: 1, verified: 2}); // cannot be judged: stays as claimed
 
     // a win the replay reproduces is confirmed with the game's own numbers and its evidence dropped
     add('honest', proof);

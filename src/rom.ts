@@ -97,12 +97,6 @@ export function decodeLog(b64: unknown): number[] | null {
   return mul === 1 ? log : null; // a dangling continuation byte means truncated
 }
 
-const SLACK_MS = 60_000;          // boot and warm-up happen before the player presses BATTLE
-const MAX_GAME_MS = 40 * 60_000; // no battle takes longer than this
-/** Game time cannot run ahead of the clock since the run started. This also bounds what a replay can cost. */
-export const withinClock = (log: number[], sinceStartMs: number) =>
-  log.length > 0 && log[log.length - 2] / TICKS_PER_MS <= Math.min(sinceStartMs + SLACK_MS, MAX_GAME_MS);
-
 /** Short fingerprint of the served ROM: a log is only evidence against the exact ROM it was played on. */
 export async function romId(rom: Uint8Array): Promise<string> {
   const h = new Uint8Array(await crypto.subtle.digest('SHA-256', rom as BufferSource));
