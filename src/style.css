@@ -94,6 +94,7 @@ canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; 
 .overlay .big { font-size: clamp(14px, 3.2vw, 26px); color: #fff; line-height: 1.5; }
 .overlay .big::first-line { color: #fff; }
 .overlay .dim { color: #8b957a; }
+.overlay .rank { color: var(--accent); }
 .overlay input {
   font: 400 16px/1 var(--pixel); text-transform: uppercase; text-align: center; width: 11em; padding: 14px 8px;
   color: #f2f6e4; background: #161a10; border: 0; box-shadow: inset 0 0 0 3px #5b6648; -webkit-user-select: text; user-select: text;

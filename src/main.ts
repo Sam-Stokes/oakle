@@ -472,6 +472,22 @@ function result() {
     ? `<p class="big">ALREADY<br>BATTLED</p><p class="dim">ONE TRY PER DAY</p>`
     : `<p class="big">${run.won ? 'YOU WON!' : 'OAK WINS'}</p><p>${run.turns} TURN${run.turns === 1 ? '' : 'S'} TAKEN</p>${run.alive != null ? `<p>${run.alive} POKEMON LEFT</p>` : ''}<p class="dim">${archive ? 'PICK ANOTHER DAY IN THE ARCHIVE' : 'COME BACK TOMORROW'}</p>`);
   renderRecord(); renderArchive(); loadBoard();
+  showRank();
+}
+
+/** If this win is on the day's leaderboard, say where. The server needs a moment to count it, so ask again a couple of times. */
+const LEADERBOARD_ROWS = 20; // what the leaderboard card lists
+async function showRank(tries = 3) {
+  const run = save.runs[day];
+  if (!run?.done || !run.won || run.voided) return;
+  try {
+    const {data} = await api(`leaderboard?day=${day}&id=${save.id}`);
+    const rank = data.todayRank as number | null;
+    const dim = document.querySelector('#overlay .dim');
+    if (rank && rank <= LEADERBOARD_ROWS) {
+      if (dim && !document.querySelector('#overlay .rank')) dim.insertAdjacentHTML('beforebegin', `<p class="rank">YOU ARE #${rank} ${archive ? 'FOR THIS DAY' : 'TODAY'}</p>`);
+    } else if (!rank && tries > 0) setTimeout(() => showRank(tries - 1), 3000);
+  } catch { /* offline: the leaderboard card shows it when it can */ }
 }
 
 main().catch(err => { app.innerHTML = `<p class="card">Could not start: ${esc(err.message)}</p>`; });

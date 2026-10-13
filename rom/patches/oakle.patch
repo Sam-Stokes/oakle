@@ -120,7 +120,7 @@ diff -ruN pokeyellow-pristine/data/trainers/special_moves.asm src/data/trainers/
  	db -1 ; end
 diff -ruN pokeyellow-pristine/engine/battle/core.asm src/engine/battle/core.asm
 --- pokeyellow-pristine/engine/battle/core.asm	2026-09-03 03:23:57
-+++ src/engine/battle/core.asm	2026-10-13 11:09:04
++++ src/engine/battle/core.asm	2026-10-13 18:24:41
 @@ -297,6 +297,11 @@
  	or [hl] ; is enemy mon HP 0?
  	jp z, HandleEnemyMonFainted ; if enemy mon HP is 0, jump
@@ -151,7 +151,27 @@ diff -ruN pokeyellow-pristine/engine/battle/core.asm src/engine/battle/core.asm
  
  EnemyMonFaintedText:
  	text_far _EnemyMonFaintedText
-@@ -6726,11 +6731,7 @@
+@@ -954,18 +959,8 @@
+ 	ld c, 40
+ 	call DelayFrames
+ 	call PrintEndBattleText
+-; win money
+-	ld hl, MoneyForWinningText
+-	call PrintText
+-	ld de, wPlayerMoney + 2
+-	ld hl, wAmountMoneyWon + 2
+-	ld c, $3
+-	predef_jump AddBCDPredef
++	ret ; Oakle: no prize money, so no "got $ for winning" line either
+ 
+-MoneyForWinningText:
+-	text_far _MoneyForWinningText
+-	text_end
+-
+ TrainerDefeatedText:
+ 	text_far _TrainerDefeatedText
+ 	text_end
+@@ -6726,11 +6721,7 @@
  
  
  BattleRandom:
@@ -634,8 +654,8 @@ diff -ruN pokeyellow-pristine/scripts/ChampionsRoom.asm src/scripts/ChampionsRoo
  ChampionsRoomOakCongratulatesPlayerText:
 diff -ruN pokeyellow-pristine/text/ChampionsRoom.asm src/text/ChampionsRoom.asm
 --- pokeyellow-pristine/text/ChampionsRoom.asm	2026-09-03 03:23:57
-+++ src/text/ChampionsRoom.asm	2026-10-13 09:24:36
-@@ -82,25 +82,34 @@
++++ src/text/ChampionsRoom.asm	2026-10-13 18:24:41
+@@ -82,25 +82,37 @@
  	done
  
  _ChampionsRoomOakText::
@@ -667,13 +687,16 @@ diff -ruN pokeyellow-pristine/text/ChampionsRoom.asm src/text/ChampionsRoom.asm
  
 -	para "<PLAYER>, you have"
 -	line "come of age!"
++; The engine puts "PROF.OAK: " (10 columns) in front of both of these, and a row of the box is 18 columns wide, so
++; the first row has 8 left and every later row up to 18. <PLAYER> can be 7 columns.
 +_OakDefeatedText::
-+	text "OAK: Hmm! Well"
-+	line "played, <PLAYER>!"
++	text "Hmm!"
++	line "Well played,"
++	cont "<PLAYER>!"
 +	prompt
 +
 +_OakVictoryText::
-+	text "OAK: Not today!"
++	text "Not yet!"
 +	line "Try again"
 +	cont "tomorrow."
 +	prompt
