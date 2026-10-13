@@ -1,0 +1,672 @@
+diff -ruN pokeyellow-pristine/data/maps/special_warps.asm src/data/maps/special_warps.asm
+--- pokeyellow-pristine/data/maps/special_warps.asm	2026-09-03 03:23:57
++++ src/data/maps/special_warps.asm	2026-10-12 15:31:57
+@@ -45,7 +45,7 @@
+ ENDM
+ 
+ NewGameWarp:
+-	special_warp_spec REDS_HOUSE_2F, 3, 6, REDS_HOUSE_2
++	special_warp_spec CHAMPIONS_ROOM, 4, 3, GYM
+ TradeCenterPlayerWarp:
+ 	special_warp_spec TRADE_CENTER,  3, 4, CLUB
+ TradeCenterFriendWarp:
+diff -ruN pokeyellow-pristine/data/trainers/parties.asm src/data/trainers/parties.asm
+--- pokeyellow-pristine/data/trainers/parties.asm	2026-09-03 03:23:57
++++ src/data/trainers/parties.asm	2026-10-12 15:31:57
+@@ -498,9 +498,9 @@
+ 
+ ProfOakData:
+ ; Unused
+-	db $FF, 66, TAUROS, 67, EXEGGUTOR, 68, ARCANINE, 69, BLASTOISE, 70, GYARADOS, 0
+-	db $FF, 66, TAUROS, 67, EXEGGUTOR, 68, ARCANINE, 69, VENUSAUR, 70, GYARADOS, 0
+-	db $FF, 66, TAUROS, 67, EXEGGUTOR, 68, ARCANINE, 69, CHARIZARD, 70, GYARADOS, 0
++	db $FF, 100, TAUROS, 100, EXEGGUTOR, 100, ARCANINE, 100, BLASTOISE, 100, GYARADOS, 0
++	db $FF, 100, TAUROS, 100, EXEGGUTOR, 100, ARCANINE, 100, VENUSAUR, 100, GYARADOS, 0
++	db $FF, 100, TAUROS, 100, EXEGGUTOR, 100, ARCANINE, 100, CHARIZARD, 100, GYARADOS, 0
+ 
+ ChiefData:
+ ; none
+diff -ruN pokeyellow-pristine/data/trainers/special_moves.asm src/data/trainers/special_moves.asm
+--- pokeyellow-pristine/data/trainers/special_moves.asm	2026-09-03 03:23:57
++++ src/data/trainers/special_moves.asm	2026-10-12 15:31:57
+@@ -157,4 +157,73 @@
+ 	db 6, 3, QUICK_ATTACK
+ 	db 0
+ 
++	db PROF_OAK, 1
++	db 1, 1, BODY_SLAM
++	db 1, 2, HYPER_BEAM
++	db 1, 3, EARTHQUAKE
++	db 1, 4, BLIZZARD
++	db 2, 1, PSYCHIC_M
++	db 2, 2, HYPNOSIS
++	db 2, 3, EXPLOSION
++	db 2, 4, DOUBLE_EDGE
++	db 3, 1, FIRE_BLAST
++	db 3, 2, BODY_SLAM
++	db 3, 3, HYPER_BEAM
++	db 3, 4, REFLECT
++	db 4, 1, SURF
++	db 4, 2, BLIZZARD
++	db 4, 3, EARTHQUAKE
++	db 4, 4, BODY_SLAM
++	db 5, 1, HYDRO_PUMP
++	db 5, 2, BLIZZARD
++	db 5, 3, THUNDERBOLT
++	db 5, 4, BODY_SLAM
++	db 0
++
++	db PROF_OAK, 2
++	db 1, 1, BODY_SLAM
++	db 1, 2, HYPER_BEAM
++	db 1, 3, EARTHQUAKE
++	db 1, 4, BLIZZARD
++	db 2, 1, PSYCHIC_M
++	db 2, 2, HYPNOSIS
++	db 2, 3, EXPLOSION
++	db 2, 4, DOUBLE_EDGE
++	db 3, 1, FIRE_BLAST
++	db 3, 2, BODY_SLAM
++	db 3, 3, HYPER_BEAM
++	db 3, 4, REFLECT
++	db 4, 1, SLEEP_POWDER
++	db 4, 2, RAZOR_LEAF
++	db 4, 3, BODY_SLAM
++	db 4, 4, SWORDS_DANCE
++	db 5, 1, HYDRO_PUMP
++	db 5, 2, BLIZZARD
++	db 5, 3, THUNDERBOLT
++	db 5, 4, BODY_SLAM
++	db 0
++
++	db PROF_OAK, 3
++	db 1, 1, BODY_SLAM
++	db 1, 2, HYPER_BEAM
++	db 1, 3, EARTHQUAKE
++	db 1, 4, BLIZZARD
++	db 2, 1, PSYCHIC_M
++	db 2, 2, HYPNOSIS
++	db 2, 3, EXPLOSION
++	db 2, 4, DOUBLE_EDGE
++	db 3, 1, FIRE_BLAST
++	db 3, 2, BODY_SLAM
++	db 3, 3, HYPER_BEAM
++	db 3, 4, REFLECT
++	db 4, 1, EARTHQUAKE
++	db 4, 2, FIRE_BLAST
++	db 4, 3, SLASH
++	db 4, 4, SWORDS_DANCE
++	db 5, 1, HYDRO_PUMP
++	db 5, 2, BLIZZARD
++	db 5, 3, THUNDERBOLT
++	db 5, 4, BODY_SLAM
++	db 0
++
+ 	db -1 ; end
+diff -ruN pokeyellow-pristine/engine/battle/core.asm src/engine/battle/core.asm
+--- pokeyellow-pristine/engine/battle/core.asm	2026-09-03 03:23:57
++++ src/engine/battle/core.asm	2026-10-13 11:09:04
+@@ -297,6 +297,11 @@
+ 	or [hl] ; is enemy mon HP 0?
+ 	jp z, HandleEnemyMonFainted ; if enemy mon HP is 0, jump
+ 	call SaveScreenTilesToBuffer1
++	ld a, [wUnusedPlayerDataByte] ; Oakle: turn counter, saturating
++	inc a
++	jr z, .oakleTurnCounted
++	ld [wUnusedPlayerDataByte], a
++.oakleTurnCounted
+ 	xor a
+ 	ld [wFirstMonsNotOutYet], a
+ 	ld a, [wPlayerBattleStatus2]
+@@ -846,7 +851,7 @@
+ .giveExpToMonsThatFought
+ 	xor a
+ 	ld [wBoostExpByExpAll], a
+-	callfar GainExperience
++	; Oakle: everyone is level 100, so no experience, no "gained EXP" text, no level-up or evolution prompts
+ 	pop af
+ 	ret z ; return if no exp all
+ 
+@@ -864,7 +869,7 @@
+ 	jr nz, .gainExpFlagsLoop
+ 	ld a, b
+ 	ld [wPartyGainExpFlags], a
+-	jpfar GainExperience
++	ret ; Oakle: see above
+ 
+ EnemyMonFaintedText:
+ 	text_far _EnemyMonFaintedText
+@@ -6726,11 +6731,7 @@
+ 
+ 
+ BattleRandom:
+-; Link battles use a shared PRNG.
+-
+-	ld a, [wLinkState]
+-	cp LINK_STATE_BATTLING
+-	jp nz, Random
++; Oakle: always the shared PRNG list (seeded from OakleConfig), so outcomes depend only on the choices made.
+ 
+ 	push hl
+ 	push bc
+diff -ruN pokeyellow-pristine/engine/battle/trainer_ai.asm src/engine/battle/trainer_ai.asm
+--- pokeyellow-pristine/engine/battle/trainer_ai.asm	2026-09-03 03:23:57
++++ src/engine/battle/trainer_ai.asm	2026-10-12 15:32:33
+@@ -322,7 +322,7 @@
+ 	ld a, [hli]
+ 	ld h, [hl]
+ 	ld l, a
+-	call Random
++	call OakleAIRandom
+ 	jp hl
+ .done
+ 	and a
+@@ -749,3 +749,42 @@
+ AIBattleUseItemText:
+ 	text_far _AIBattleUseItemText
+ 	text_end
++
++
++; Oakle: same shared PRNG list as BattleRandom in core.asm (copied: this file is in another bank).
++OakleAIRandom:
++	push hl
++	push bc
++	ld a, [wLinkBattleRandomNumberListIndex]
++	ld c, a
++	ld b, 0
++	ld hl, wLinkBattleRandomNumberList
++	add hl, bc
++	inc a
++	ld [wLinkBattleRandomNumberListIndex], a
++	cp SERIAL_RNS_LENGTH - 1
++	ld a, [hl]
++	pop bc
++	pop hl
++	ret c
++	push hl
++	push bc
++	push af
++	xor a
++	ld [wLinkBattleRandomNumberListIndex], a
++	ld hl, wLinkBattleRandomNumberList
++	ld b, SERIAL_RNS_LENGTH - 1
++.loop
++	ld a, [hl]
++	ld c, a
++	add a
++	add a
++	add c
++	inc a
++	ld [hli], a
++	dec b
++	jr nz, .loop
++	pop af
++	pop bc
++	pop hl
++	ret
+diff -ruN pokeyellow-pristine/engine/oakle/oakle_party.asm src/engine/oakle/oakle_party.asm
+--- pokeyellow-pristine/engine/oakle/oakle_party.asm	1970-01-01 12:00:00
++++ src/engine/oakle/oakle_party.asm	2026-10-13 10:24:17
+@@ -0,0 +1,238 @@
++; Oakle: daily config (the web page overwrites these bytes in the ROM before boot) and new-game setup.
++; Lives in bank3 next to _AddPartyMon so it can reuse AddPartyMon_WriteMovePP.
++
++DEF OAKLE_CFG_TRAINER_NO EQU 6  ; Oak trainer number 1-3 (picks his starter)
++DEF OAKLE_CFG_DAY        EQU 7  ; dw day number, informational
++DEF OAKLE_CFG_RNG        EQU 9  ; 9 seed bytes for the shared battle RNG list
++DEF OAKLE_CFG_NAME       EQU 18 ; player name, NAME_LENGTH bytes ("@" terminated)
++DEF OAKLE_CFG_PARTY      EQU 29 ; 5 x (species, move1..move4)
++
++OakleConfig::
++	db $4f, $41, $4b, $4c, $45, 1 ; ASCII "OAKLE" + format version (raw bytes, not the game charset)
++	db 1                          ; trainer number: 1 BLASTOISE, 2 VENUSAUR, 3 CHARIZARD
++	dw 1                          ; day
++	db 11, 22, 33, 44, 55, 66, 77, 88, 99 ; RNG seed
++	db "RED@@@@@@@@"              ; player name
++	db ALAKAZAM, PSYCHIC_M, RECOVER, THUNDER_WAVE, SEISMIC_TOSS
++	db SNORLAX,  BODY_SLAM, EARTHQUAKE, HYPER_BEAM, REST
++	db STARMIE,  SURF, BLIZZARD, THUNDERBOLT, RECOVER
++	db CHANSEY,  SOFTBOILED, ICE_BEAM, THUNDERBOLT, THUNDER_WAVE
++	db ZAPDOS,   THUNDERBOLT, DRILL_PECK, THUNDER_WAVE, AGILITY
++OakleConfigEnd::
++
++; Called once from OakleStart, after InitPlayerData2.
++OakleSetup::
++	ld hl, OakleConfig + OAKLE_CFG_NAME
++	ld de, wPlayerName
++	ld bc, NAME_LENGTH
++	call CopyData
++	ld hl, .rivalName
++	ld de, wRivalName
++	ld bc, NAME_LENGTH
++	call CopyData
++
++	ld a, TEXT_DELAY_FAST ; fast text, battle animations on, SHIFT style
++	ld [wOptions], a
++
++	; seed the shared battle RNG (the link-battle list) so every player gets the same dice
++	ld hl, OakleConfig + OAKLE_CFG_RNG
++	ld de, wLinkBattleRandomNumberList
++	ld bc, SERIAL_RNS_LENGTH - 1
++	call CopyData
++	xor a
++	ld [wLinkBattleRandomNumberListIndex], a
++	ld [wUnusedPlayerDataByte], a ; turn counter (was $ff from InitPlayerData2)
++	ld a, [OakleConfig + OAKLE_CFG_TRAINER_NO]
++	ld [wUnusedCardKeyGateID], a ; read back when Oak's battle starts
++
++	; party: 5 mons at Lv 100, max DVs and stat exp, moves straight from the config
++	ld a, $10 ; lower nybble 0 = player party, non-zero = no nickname prompt (reset to 0 below)
++	ld [wMonDataLocation], a
++	ld hl, OakleConfig + OAKLE_CFG_PARTY
++	ld c, 5
++.partyLoop
++	push bc
++	push hl
++	ld a, [hl]
++	ld [wCurPartySpecies], a
++	ld a, 100
++	ld [wCurEnemyLevel], a
++	call AddPartyMon
++	ld hl, wPartyMons
++	ld a, [wPartyCount]
++	dec a
++	ld bc, PARTYMON_STRUCT_LENGTH
++	call AddNTimes ; hl = the mon we just added
++	push hl
++	ld bc, MON_DVS
++	add hl, bc
++	ld a, $ff
++	ld [hli], a
++	ld [hl], a
++	pop hl
++	push hl
++	ld bc, MON_HP_EXP
++	add hl, bc
++	ld b, 2 * NUM_STATS
++.expLoop
++	ld [hli], a
++	dec b
++	jr nz, .expLoop
++	pop hl
++	pop de ; de = config entry (species, moves...)
++	push de
++	push hl
++	inc de
++	ld bc, MON_MOVES
++	add hl, bc
++	push hl ; moves in the party struct
++	ld a, [de]
++	ld [hli], a
++	inc de
++	ld a, [de]
++	ld [hli], a
++	inc de
++	ld a, [de]
++	ld [hli], a
++	inc de
++	ld a, [de]
++	ld [hl], a
++	pop hl ; hl = moves
++	pop de ; de = struct
++	push de
++	push hl
++	ld h, d
++	ld l, e
++	ld bc, MON_PP - 1
++	add hl, bc
++	ld d, h
++	ld e, l ; de = PP - 1 (AddPartyMon_WriteMovePP pre-increments)
++	pop hl
++	call AddPartyMon_WriteMovePP
++	pop hl ; hl = struct
++	push hl
++	ld bc, MON_MAXHP
++	add hl, bc
++	ld d, h
++	ld e, l ; de = stat destination
++	pop hl
++	push hl
++	ld bc, MON_HP_EXP - 1
++	add hl, bc
++	ld b, 1 ; use stat exp
++	call CalcStats
++	pop hl
++	push hl
++	ld bc, MON_MAXHP
++	add hl, bc
++	ld a, [hli]
++	ld d, a
++	ld a, [hl]
++	ld e, a ; max HP
++	pop hl
++	ld bc, MON_HP
++	add hl, bc
++	ld a, d
++	ld [hli], a
++	ld [hl], e ; current HP = max HP
++
++	; nickname = species name (the naming prompt is skipped when wMonDataLocation != 0)
++	ld a, [wCurPartySpecies]
++	ld [wNamedObjectIndex], a
++	call GetMonName
++	ld hl, wPartyMonNicks
++	ld a, [wPartyCount]
++	dec a
++	ld bc, NAME_LENGTH
++	call AddNTimes
++	ld d, h
++	ld e, l
++	ld hl, wNameBuffer
++	ld bc, NAME_LENGTH
++	call CopyData
++	pop hl ; hl = config entry
++	ld bc, 5
++	add hl, bc
++	pop bc
++	dec c
++	jp nz, .partyLoop
++
++	xor a ; PLAYER_PARTY_DATA: LoadMonData & co. treat anything above 3 as the day-care mon
++	ld [wMonDataLocation], a
++
++	SetEvent EVENT_BEAT_CHAMPION_RIVAL
++	ld a, 4 ; SCRIPT_CHAMPIONSROOM_OAK_ARRIVES (not visible outside maps.asm)
++	ld [wChampionsRoomCurScript], a
++	ret
++
++.rivalName:
++	db "GARY@@@@@@@"
++
++; Battle is over (win: wIsInBattle == 0, loss: LOST_BATTLE). Record the result in SRAM bank 3 where the page
++; looks for it, show a closing text and stop. Never returns, so the usual blackout warp never happens.
++DEF OAKLE_SRAM_BANK EQU 1 ; save-data bank: the game only touches it when saving, and not this far up; bank 3 top is scratch
++DEF OAKLE_SRAM_ADDR EQU $bf00 ; "OAKLE", result (1 win / 2 loss), turns, day lo, day hi, party mons still standing
++
++OakleFinish::
++	ld a, [wIsInBattle]
++	inc a ; LOST_BATTLE is $ff
++	ld b, 1 ; win
++	jr nz, .won
++	ld b, 2 ; loss
++.won
++	; d = how many of your Pokemon are still standing
++	ld hl, wPartyMons + MON_HP
++	ld a, [wPartyCount]
++	ld e, a
++	ld d, 0
++.alive
++	ld a, [hli]
++	or [hl] ; HP high | low
++	jr z, .down
++	inc d
++.down
++	ld a, l
++	add PARTYMON_STRUCT_LENGTH - 1
++	ld l, a
++	jr nc, .nextMon
++	inc h
++.nextMon
++	dec e
++	jr nz, .alive
++	ld a, OAKLE_SRAM_BANK
++	call OpenSRAM
++	ld hl, OAKLE_SRAM_ADDR
++	ld a, $4f ; ASCII "OAKLE"
++	ld [hli], a
++	ld a, $41
++	ld [hli], a
++	ld a, $4b
++	ld [hli], a
++	ld a, $4c
++	ld [hli], a
++	ld a, $45
++	ld [hli], a
++	ld a, b
++	ld [hli], a
++	ld a, [wUnusedPlayerDataByte]
++	ld [hli], a
++	ld a, [OakleConfig + OAKLE_CFG_DAY]
++	ld [hli], a
++	ld a, [OakleConfig + OAKLE_CFG_DAY + 1]
++	ld [hli], a
++	ld a, d
++	ld [hl], a
++	call CloseSRAM
++	ld hl, OakleDoneText
++	call PrintText
++.stop
++	halt
++	jr .stop
++
++OakleDoneText:
++	text "Today's battle"
++	line "is over."
++
++	para "Come back"
++	line "tomorrow!"
++	done
+diff -ruN pokeyellow-pristine/engine/oakle/oakle_start.asm src/engine/oakle/oakle_start.asm
+--- pokeyellow-pristine/engine/oakle/oakle_start.asm	1970-01-01 12:00:00
++++ src/engine/oakle/oakle_start.asm	2026-10-13 10:50:11
+@@ -0,0 +1,32 @@
++; Oakle: replaces the title screen / new game speech. Boots straight into the Champion's room
++; (NewGameWarp in data/maps/special_warps.asm) with the daily party from OakleConfig.
++OakleStart::
++	call ClearScreen
++	call LoadTextBoxTilePatterns
++	call PrepareOakSpeech
++	predef InitPlayerData2
++	farcall OakleSetup
++	ld a, [wDefaultMap]
++	ld [wDestinationMap], a
++	call PrepareForSpecialWarp
++	xor a
++	ldh [hTileAnimations], a
++	ld a, PLAYER_DIR_UP
++	ld [wPlayerMovingDirection], a
++	; SpecialEnterMap, inlined: ResetPlayerSpriteData clears the sprite to face south, so set the facing
++	; right after it, otherwise the first frames show RED facing the wrong way
++	xor a
++	ldh [hJoyPressed], a
++	ldh [hJoyHeld], a
++	ldh [hJoy5], a
++	ld [wCableClubDestinationMap], a
++	ld hl, wStatusFlags6
++	set BIT_GAME_TIMER_COUNTING, [hl]
++	call ResetPlayerSpriteData
++	ld a, SPRITE_FACING_UP
++	ld [wSpritePlayerStateData1FacingDirection], a
++	ld [wSpritePlayerStateData1ImageIndex], a ; the picture, too: it is otherwise only refreshed a frame later
++	ld c, 1
++	call DelayFrames
++	call Func_5cc1
++	jp EnterMap
+diff -ruN pokeyellow-pristine/home/init.asm src/home/init.asm
+--- pokeyellow-pristine/home/init.asm	2026-09-03 03:23:57
++++ src/home/init.asm	2026-10-12 15:31:57
+@@ -98,8 +98,6 @@
+ 	dec a
+ 	ld [wUpdateSpritesEnabled], a
+ 
+-	predef PlayIntro
+-
+ 	call DisableLCD
+ 	call ClearVram
+ 	call GBPalNormal
+@@ -107,7 +105,8 @@
+ 	ld a, LCDC_DEFAULT
+ 	ldh [rLCDC], a
+ 
+-	jp PrepareTitleScreen
++	farcall OakleStart
++	jp Init
+ 
+ ClearVram::
+ 	ld hl, STARTOF(VRAM)
+diff -ruN pokeyellow-pristine/main.asm src/main.asm
+--- pokeyellow-pristine/main.asm	2026-09-03 03:23:57
++++ src/main.asm	2026-10-12 15:31:57
+@@ -15,6 +15,7 @@
+ INCLUDE "engine/link/cable_club.asm"
+ INCLUDE "engine/menus/main_menu.asm"
+ INCLUDE "engine/movie/oak_speech/oak_speech.asm"
++INCLUDE "engine/oakle/oakle_start.asm"
+ INCLUDE "engine/overworld/special_warps.asm"
+ INCLUDE "engine/debug/debug_party.asm"
+ INCLUDE "engine/menus/naming_screen.asm"
+@@ -52,6 +53,7 @@
+ INCLUDE "engine/overworld/toggleable_objects.asm"
+ INCLUDE "engine/overworld/push_boulder.asm"
+ INCLUDE "engine/pokemon/add_mon.asm"
++INCLUDE "engine/oakle/oakle_party.asm"
+ INCLUDE "engine/flag_action.asm"
+ INCLUDE "engine/events/heal_party.asm"
+ INCLUDE "engine/math/bcd.asm"
+diff -ruN pokeyellow-pristine/scripts/ChampionsRoom.asm src/scripts/ChampionsRoom.asm
+--- pokeyellow-pristine/scripts/ChampionsRoom.asm	2026-09-03 03:23:57
++++ src/scripts/ChampionsRoom.asm	2026-10-13 10:49:14
+@@ -24,6 +24,8 @@
+ 	dw_const ChampionsRoomOakExitsScript,                 SCRIPT_CHAMPIONSROOM_OAK_EXITS
+ 	dw_const ChampionsRoomPlayerFollowsOakScript,         SCRIPT_CHAMPIONSROOM_PLAYER_FOLLOWS_OAK
+ 	dw_const ChampionsRoomCleanupScript,                  SCRIPT_CHAMPIONSROOM_CLEANUP_SCRIPT
++	dw_const ChampionsRoomOakleReadyScript,               SCRIPT_CHAMPIONSROOM_OAKLE_READY
++	dw_const ChampionsRoomOakleBattleDoneScript,          SCRIPT_CHAMPIONSROOM_OAKLE_BATTLE_DONE
+ 
+ ChampionsRoomDefaultScript:
+ 	ret
+@@ -99,10 +101,8 @@
+ 	ret
+ 
+ ChampionsRoomOakArrivesScript:
+-	farcall Music_Cities1AlternateTempo
+-	ld a, TEXT_CHAMPIONSROOM_OAK
+-	ldh [hTextID], a
+-	call ChampionsRoom_DisplayTextID_AllowABSelectStart
++	ld a, PAD_BUTTONS | PAD_CTRL_PAD ; Oakle: no rival dialogue, Oak just walks in
++	ld [wJoyIgnore], a
+ 	ld a, CHAMPIONSROOM_OAK
+ 	ldh [hSpriteIndex], a
+ 	call SetSpriteMovementBytesToFF
+@@ -144,10 +144,19 @@
+ 	ld a, TEXT_CHAMPIONSROOM_OAK_CONGRATULATES_PLAYER
+ 	ldh [hTextID], a
+ 	call ChampionsRoom_DisplayTextID_AllowABSelectStart
+-	ld a, SCRIPT_CHAMPIONSROOM_OAK_DISAPPOINTED_WITH_RIVAL
++	xor a
++	ld [wJoyIgnore], a ; Oakle: you may walk, open START > #MON, then talk to OAK
++	ld a, SCRIPT_CHAMPIONSROOM_OAKLE_READY
+ 	ld [wChampionsRoomCurScript], a
+ 	ret
+ 
++ChampionsRoomOakleReadyScript:
++	ret
++
++ChampionsRoomOakleBattleDoneScript:
++	farcall OakleFinish ; never returns
++	ret
++
+ ChampionsRoomOakDisappointedWithRivalScript:
+ 	ld a, CHAMPIONSROOM_OAK
+ 	ldh [hSpriteIndex], a
+@@ -265,7 +274,47 @@
+ 	text_end
+ 
+ ChampionsRoomOakText:
++	text_asm
++	ld a, [wChampionsRoomCurScript]
++	cp SCRIPT_CHAMPIONSROOM_OAKLE_READY
++	jr z, .battle
++	ld hl, .ArrivalText
++	call PrintText
++	jp TextScriptEnd
++.battle
++	ld hl, .ReadyText
++	call PrintText
++	call Delay3
++	ld hl, wStatusFlags3
++	set BIT_TALKED_TO_TRAINER, [hl]
++	set BIT_PRINT_END_BATTLE_TEXT, [hl]
++	ld hl, OakDefeatedText
++	ld de, OakVictoryText
++	call SaveEndBattleTextPointers
++	ld a, OPP_PROF_OAK
++	ld [wCurOpponent], a
++	ld a, [wUnusedCardKeyGateID]
++	ld [wTrainerNo], a
++	xor a
++	ldh [hJoyHeld], a
++	ld a, SCRIPT_CHAMPIONSROOM_OAKLE_BATTLE_DONE
++	ld [wChampionsRoomCurScript], a
++	jp TextScriptEnd
++
++.ArrivalText:
+ 	text_far _ChampionsRoomOakText
++	text_end
++
++.ReadyText:
++	text_far _ChampionsRoomOakReadyText
++	text_end
++
++OakDefeatedText:
++	text_far _OakDefeatedText
++	text_end
++
++OakVictoryText:
++	text_far _OakVictoryText
+ 	text_end
+ 
+ ChampionsRoomOakCongratulatesPlayerText:
+diff -ruN pokeyellow-pristine/text/ChampionsRoom.asm src/text/ChampionsRoom.asm
+--- pokeyellow-pristine/text/ChampionsRoom.asm	2026-09-03 03:23:57
++++ src/text/ChampionsRoom.asm	2026-10-13 09:24:36
+@@ -82,25 +82,34 @@
+ 	done
+ 
+ _ChampionsRoomOakText::
+-	text "OAK: <PLAYER>!"
+-	done
++	text "<PLAYER> defeated"
++	line "<RIVAL>!"
+ 
+-_ChampionsRoomOakCongratulatesPlayerText::
+-	text "OAK: So, you won!"
+-	line "Congratulations!"
+-	cont "You're the new"
+-	cont "#MON LEAGUE"
++	para "You are the new"
++	line "#MON LEAGUE"
+ 	cont "champion!"
++	done
+ 
+-	para "You've grown up so"
+-	line "much since you"
+-	cont "first left with"
+-	cont "@"
+-	text_ram wNameBuffer
+-	text "!"
++_ChampionsRoomOakReadyText::
++	text "OAK: Show me what"
++	line "you've got!"
++	done
+ 
+-	para "<PLAYER>, you have"
+-	line "come of age!"
++_OakDefeatedText::
++	text "OAK: Hmm! Well"
++	line "played, <PLAYER>!"
++	prompt
++
++_OakVictoryText::
++	text "OAK: Not today!"
++	line "Try again"
++	cont "tomorrow."
++	prompt
++
++_ChampionsRoomOakCongratulatesPlayerText::
++	text "OAK: <PLAYER>!"
++	line "Prepare your team"
++	cont "to battle me!"
+ 	done
+ 
+ _ChampionsRoomOakDisappointedWithRivalText::

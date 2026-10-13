@@ -1,0 +1,37 @@
+node_modules
+dist
+.wrangler
+*.gbc
+*.gb
+*.sav
+rom/pokeyellow-pristine/
+rom/work/
+rom/tools/
+public/rom/
+rom/src/
+rom/variant/
+
+# personal / local tooling and notes
+.claude/
+.mcp.json
+CLAUDE.md
+AGENTS.md
+graphify-out/
+TEMP-NOTES.md
+.playwright-mcp/
+# local deploy config (real D1 id), secrets, env
+wrangler.local.toml
+.dev.vars
+.env
+.env.*
+# generated at build time (npm run days)
+public/days/
+
+# generated from your own ROM build (Nintendo artwork): never commit
+public/favicon.png
+public/apple-touch-icon.png
+public/og.png
+
+/.claude
+.DS_Store
+*.log

@@ -1,0 +1,43 @@
+# Template. Put your real database_id in an untracked wrangler.local.toml (scripts/wrangler.sh prefers it).
+name = "oakle"
+main = "worker/index.ts"
+compatibility_date = "2026-05-01"
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+run_worker_first = ["/", "/index.html", "/signin", "/api/*", "/rom/*"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "oakle"
+database_id = "REPLACE_WITH_YOUR_D1_ID" # from: npx wrangler d1 create oakle
+
+# Win verification, set by VERIFY below:
+#   "0"      results are accepted as the browser reports them (plausibility checks only)
+#   "audit"  wins are accepted at once, then replayed on the real game by scripts/audit.ts (GitHub Actions, free) and
+#            corrected within minutes if they do not reproduce. Needs the secrets listed in .github/workflows/audit.yml.
+#   "1"      each win is replayed inside the Worker before it is accepted (10-30 s of CPU per win: needs Workers Paid,
+#            and the [limits] block below)
+[vars]
+VERIFY = "0"
+# [limits]
+# cpu_ms = 120000
+
+# Logs: view with `npx wrangler tail oakle` or in the dashboard.
+[observability]
+enabled = true
+
+# Per-IP flood guard for /api/* and /rom/* (Workers Rate Limiting; period must be 10 or 60 seconds).
+[[ratelimits]]
+name = "FLOOD"
+namespace_id = "1001" # any positive integer, unique within your Cloudflare account
+  [ratelimits.simple]
+  limit = 240
+  period = 60
+
+# Custom domain (the zone must be on Cloudflare). Uncomment in wrangler.local.toml, then redeploy:
+# workers_dev = false   # top-level key: place it above the first [table] in the file
+# [[routes]]
+# pattern = "oakle.example.com"
+# custom_domain = true

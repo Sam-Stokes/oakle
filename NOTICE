@@ -1,0 +1,16 @@
+Oakle is an unofficial fan project. It is not affiliated with, endorsed by or sponsored by Nintendo,
+Game Freak or The Pokemon Company. Pokemon and Pokemon character names are trademarks of their owners.
+
+This repository contains NO game data: no ROM, no sprites, no music. The game is built locally from the public
+pret/pokeyellow disassembly (fetched at build time by rom/build.sh, pinned to one commit) plus the patch in
+rom/patches/. The favicon and the social card are rendered from that local build and are not committed.
+
+Whoever deploys Oakle serves the ROM they built to their visitors, from their own domain. That is the deployer's
+responsibility, and a rights holder may ask for it to be taken down. Never commit a ROM, sprites, music or generated
+images to this repository (scripts/prepublish-check.sh enforces this).
+
+Third-party components that ARE redistributed here:
+  - binjgb (public/emu/)        MIT          LICENSES/binjgb-MIT.txt    https://github.com/binji/binjgb
+  - Outfit (public/fonts/)      SIL OFL 1.1  LICENSES/Outfit-OFL.txt
+  - Press Start 2P (public/fonts/) SIL OFL 1.1 LICENSES/PressStart2P-OFL.txt
+Build-time tools (not redistributed): rgbds (ISC), pret/pokeyellow, @pkmn/sim and @pkmn/dex (MIT, dev only).

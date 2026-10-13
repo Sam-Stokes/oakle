@@ -1,0 +1,35 @@
+{
+  "name": "oakle",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A daily Pokemon Yellow challenge: beat Professor Oak's team with a new random party each day. One try a day.",
+  "author": "Sam Stokes",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "check": "sh scripts/prepublish-check.sh",
+    "dev": "vite",
+    "build": "vite build",
+    "api": "sh scripts/wrangler.sh dev --port 8787",
+    "deploy": "npm run rom && npm run days && vite build && sh scripts/wrangler.sh deploy",
+    "rom": "sh rom/build.sh && node scripts/gen-share.cjs",
+    "days": "tsx scripts/gen-days.ts",
+    "predev": "test -f public/days/0.json || npm run days",
+    "prebuild": "test -f public/days/0.json || npm run days"
+  },
+  "devDependencies": {
+    "@pkmn/dex": "^0.10.11",
+    "@pkmn/sim": "^0.10.11",
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vitest": "^4.1.11",
+    "wrangler": "^4.86.0"
+  }
+}
