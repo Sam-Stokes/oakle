@@ -3,7 +3,9 @@ Game Freak or The Pokemon Company. Pokemon and Pokemon character names are trade
 
 This repository contains NO game data: no ROM, no sprites, no music. The game is built locally from the public
 pret/pokeyellow disassembly (fetched at build time by rom/build.sh, pinned to one commit) plus the patch in
-rom/patches/. The favicon and the social card are rendered from that local build and are not committed.
+rom/patches/. The favicon, the social
+card and the small team pictures are generated or downloaded at build time and are not committed (the pictures come
+from the Yellow sprites in github.com/PokeAPI/sprites).
 
 Whoever deploys Oakle serves the ROM they built to their visitors, from their own domain. That is the deployer's
 responsibility, and a rights holder may ask for it to be taken down. Never commit a ROM, sprites, music or generated

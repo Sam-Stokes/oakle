@@ -28,6 +28,7 @@ wrangler.local.toml
 public/days/
 
 # generated from your own ROM build (Nintendo artwork): never commit
+public/sprites/
 public/favicon.png
 public/apple-touch-icon.png
 public/og.png

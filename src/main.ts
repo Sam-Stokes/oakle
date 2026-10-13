@@ -163,8 +163,12 @@ const overlay = (html: string | null) => { const o = $('#overlay'); o.hidden = h
 // ---- side cards
 const renderTeam = () => {
   const el = $<HTMLDetailsElement>('#team');
+  if (!el.dataset.init) { el.open = true; el.dataset.init = '1'; } // open to start with; after that it stays as the player left it
+  const picture = (i: number) => `<img class="sprite" src="/sprites/${today.party[i]?.[0]}.png" alt="" width="56" height="56">`;
   el.innerHTML = `<summary><span>${archive ? `Team for #${day}` : 'Your team today'}</span></summary>
-    <div class="team-list">${today.team.map((m, i) => `<div class="mon"><b><i>${i + 1}</i>${esc(m.species)}</b><ul>${m.moves.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>`).join('')}</div>`;
+    <div class="team-list">${today.team.map((m, i) => `<div class="mon">${picture(i)}<b><i>${i + 1}</i>${esc(m.species)}</b><ul>${m.moves.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>`).join('')}</div>`;
+  // the pictures are fetched at build time; when one is missing the row just shows without it
+  el.querySelectorAll<HTMLImageElement>('.sprite').forEach(img => img.addEventListener('error', () => img.remove()));
 };
 
 function renderHow() {

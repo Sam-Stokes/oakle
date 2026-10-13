@@ -17,7 +17,7 @@
     "build": "vite build",
     "api": "sh scripts/wrangler.sh dev --port 8787",
     "deploy": "npm run rom && npm run days && vite build && sh scripts/wrangler.sh deploy",
-    "rom": "sh rom/build.sh && node scripts/gen-share.cjs",
+    "rom": "sh rom/build.sh && node scripts/gen-share.cjs && node scripts/gen-sprites.cjs",
     "days": "tsx scripts/gen-days.ts",
     "predev": "test -f public/days/0.json || npm run days",
     "prebuild": "test -f public/days/0.json || npm run days"
