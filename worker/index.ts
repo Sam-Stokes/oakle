@@ -4,6 +4,7 @@ import {dayNumber} from '../src/day';
 import {decodeLog} from '../src/rom';
 import {cleanCode, cleanName, isBlocked, makeCode, streaks} from './stats';
 import {verify} from './verify';
+import {kickAudit} from './kick';
 
 const json = (o: unknown, status = 200) => new Response(JSON.stringify(o), {status, headers: {
   'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'strict-transport-security': 'max-age=31536000',
@@ -65,7 +66,7 @@ const boardRows = async (db: any, day: number) => {
 declare const HTMLRewriter: any; // Workers runtime global (no @cloudflare/workers-types in this project)
 
 export default {
-  async fetch(req: Request, env: {DB: any; ASSETS: {fetch: typeof fetch}; FLOOD?: {limit(o: {key: string}): Promise<{success: boolean}>}; VERIFY?: string}) {
+  async fetch(req: Request, env: {DB: any; ASSETS: {fetch: typeof fetch}; FLOOD?: {limit(o: {key: string}): Promise<{success: boolean}>}; VERIFY?: string; GITHUB_TOKEN?: string; GITHUB_REPO?: string}, ctx: {waitUntil(p: Promise<unknown>): void}) {
     const url = new URL(req.url), db = env.DB;
     const ip = req.headers.get('CF-Connecting-IP') ?? 'local';
 
@@ -206,15 +207,18 @@ export default {
         };
         // one try, one day: a battle that was not finished before the day it was started on ended does not count
         if (dayNumber(new Date(r.started_at)) !== current) return voidRun();
-        // not something the game can produce: a win needs 5 knockouts and a survivor, a loss leaves none, no turns is no battle
-        if (turns === 0 || (body.won ? turns < 5 || alive < 1 : alive !== 0)) return voidRun();
+        // not something the game can produce: no turns is no battle. Where no replay backs the result up, a win also needs
+        // 5 knockouts and a survivor and a loss leaves none; with a replay the replay decides, so a genuine result is never
+        // voided on a guess.
+        const replayed = env.VERIFY === '1' || env.VERIFY === 'audit';
+        if (turns === 0 || (!replayed && (body.won ? turns < 5 || alive < 1 : alive !== 0))) return voidRun();
 
         let verdict = {won: body.won as boolean, turns, alive}, evidence: string | null = null, verified: number | null = null;
         const mode = env.VERIFY;
         if (body.won && (mode === '1' || mode === 'audit')) {
           // A claimed win needs its input log, and what the replay says is what the game itself did.
           // VERIFY = "1" replays it here (needs Workers Paid); "audit" accepts it now and scripts/audit.ts replays it.
-          const proof = JSON.stringify({name: cleanName(body.name), rom: String(body.rom ?? '').slice(0, 32), log: body.log});
+          const proof = JSON.stringify({name: cleanName(body.name), rom: String(body.rom ?? '').slice(0, 32), cfg: String(body.cfg ?? '').slice(0, 32), log: body.log});
           if (mode === '1') {
             if (await limited(db, `finish:${ip}`, 6)) return json({error: 'slow down'}, 429);
             const v = await verify(env.ASSETS, url.origin, day, cleanName(body.name), body.log, body.rom)
@@ -231,6 +235,7 @@ export default {
         await db.prepare(`UPDATE runs SET finished_at = ?, won = ?, turns = ?, alive = ?, log = ?, verified = ? WHERE player_id = ? AND day = ?`)
           .bind(now, verdict.won ? 1 : 0, verdict.turns, verdict.alive, evidence, verified, body.id, day).run();
         boards.clear();
+        if (verified === 0) ctx.waitUntil(kickAudit(env).catch((e) => console.error('audit dispatch error', e))); // audit this win now
         return json(verdict);
       }
       return json({error: 'not found'}, 404);

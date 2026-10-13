@@ -3,7 +3,7 @@
 // few minutes, or by hand: CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ACCOUNT_ID=... D1_DATABASE_ID=... npx tsx scripts/audit.ts
 import {createRequire} from 'node:module';
 import {pathToFileURL} from 'node:url';
-import {decodeLog, patchRom, replay, romId, type Day, type Result} from '../src/rom';
+import {dayId, decodeLog, patchRom, replay, romId, type Day, type Result} from '../src/rom';
 
 export type Db = {all(sql: string, params?: string[]): Promise<any[]>};
 type Deps = {site: string; fetch: typeof fetch; load: () => Promise<any>; replayFn?: typeof replay; batch?: number};
@@ -27,28 +27,47 @@ export async function audit(db: Db, {site, fetch, load, replayFn = replay, batch
   const chunks = new Map<number, Promise<Day[]>>();
   const days = (n: number) => { const k = Math.floor((n - 1) / 50); if (!chunks.has(k)) chunks.set(k, get(`/days/${k}.json`).then(r => r.json()).then((j: any) => j.days)); return chunks.get(k)!; };
 
+  type Decision = {kind: 'confirm' | 'void' | 'skip'; day: number; who: string; player: string; res: Result | null; why: string};
+  const decisions: Decision[] = [];
   for (const row of rows) {
     const day = Number(row.day), who = String(row.player_id).slice(0, 6);
-    const where = `WHERE player_id = ? AND day = ${day} AND verified = 0`;
     let evidence: any = null;
-    try { evidence = JSON.parse(row.log); } catch { /* corrected below */ }
-    // verified = 2: cannot be audited (the evidence is for a different ROM). Marked so it never blocks the queue.
-    const skip = async (why: string) => { await db.all(`UPDATE runs SET verified = 2 ${where}`, [row.player_id]); out.skipped++; log(`day ${day} ${who}: skipped, ${why}`); };
-    if (evidence && evidence.rom !== id) { await skip('the ROM changed since it was played'); continue; }
+    try { evidence = JSON.parse(row.log); } catch { /* voided below */ }
+    const decide = (kind: Decision['kind'], res: Result | null = null, why = '') => decisions.push({kind, day, who, player: row.player_id, res, why});
+    // skipped (verified = 2): the evidence is for different data than what is served now, so it cannot be judged. It is
+    // left as it was claimed, never voided, and marked so it does not block the queue.
+    if (evidence && evidence.rom !== id) { decide('skip', null, 'the ROM changed since it was played'); continue; }
     const events = evidence ? decodeLog(evidence.log) : null;
     const d = (await days(day)).find(x => x.day === day);
-    if (events && !d) { await skip('no data for that day'); continue; }
+    if (events && !d) { decide('skip', null, 'no data for that day'); continue; }
+    if (events && d && evidence.cfg && evidence.cfg !== (await dayId(d))) { decide('skip', null, 'the data for that day changed since it was played'); continue; }
     const res: Result | null = events && d ? await replayFn(load, patchRom(rom, config, d, String(evidence.name ?? '')), events, day) : null;
-    if (res?.won) { // the game itself says it was a win; its numbers replace the claimed ones
-      await db.all(`UPDATE runs SET turns = ${res.turns | 0}, alive = ${res.alive | 0}, verified = 1, log = NULL ${where}`, [row.player_id]);
-      out.confirmed++; log(`day ${day} ${who}: confirmed, ${res.turns} turns`);
-    } else {
+    if (res?.won) decide('confirm', res);
+    else decide('void', res, res ? 'the replay was not a win' : 'the replay never finished');
+  }
+
+  // Circuit breaker: several wins failing while none confirms looks like a fault in the audit, not several cheaters.
+  // Nothing is voided then, the wins stay counted as claimed, and the run fails loudly so it gets looked at.
+  const voids = decisions.filter(x => x.kind === 'void'), confirms = decisions.filter(x => x.kind === 'confirm');
+  const suspicious = voids.length >= 3 && confirms.length === 0;
+  if (suspicious) log(`SUSPICIOUS: ${voids.length} of ${decisions.length} wins did not reproduce and none did. Not voiding any of them (this looks like a fault, not cheating).`);
+
+  for (const x of decisions) {
+    const where = `WHERE player_id = ? AND day = ${x.day} AND verified = 0`;
+    if (x.kind === 'confirm') { // the game itself says it was a win; its numbers replace the claimed ones
+      await db.all(`UPDATE runs SET turns = ${x.res!.turns | 0}, alive = ${x.res!.alive | 0}, verified = 1, log = NULL ${where}`, [x.player]);
+      out.confirmed++; log(`day ${x.day} ${x.who}: confirmed, ${x.res!.turns} turns`);
+    } else if (x.kind === 'skip') {
+      await db.all(`UPDATE runs SET verified = 2 ${where}`, [x.player]);
+      out.skipped++; log(`day ${x.day} ${x.who}: skipped, ${x.why}`);
+    } else if (!suspicious) {
       // Not a win on replay: it stops counting. It is never turned into a loss (void: counted as neither). The evidence
       // stays on the row, and verified = 3 is what the page and the Worker read as "void".
-      await db.all(`UPDATE runs SET finished_at = NULL, won = NULL, turns = NULL, alive = NULL, verified = 3 ${where}`, [row.player_id]);
-      out.corrected++; log(`day ${day} ${who}: VOIDED (${res ? 'the replay was not a win' : 'the replay never finished'})`);
+      await db.all(`UPDATE runs SET finished_at = NULL, won = NULL, turns = NULL, alive = NULL, verified = 3 ${where}`, [x.player]);
+      out.corrected++; log(`day ${x.day} ${x.who}: VOIDED (${x.why})`);
     }
   }
+  if (suspicious) throw new Error('audit: suspicious batch, nothing voided');
   return out;
 }
 
@@ -68,7 +87,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const {CLOUDFLARE_API_TOKEN: token, CLOUDFLARE_ACCOUNT_ID: account, D1_DATABASE_ID: database, SITE_URL} = process.env;
   if (!token || !account || !database) { console.log('audit: not configured (needs CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, D1_DATABASE_ID), nothing to do'); process.exit(0); }
   const {load} = createRequire(import.meta.url)('./emu.cjs');
-  audit(d1(account, database, token), {site: (SITE_URL || 'https://oakle.day').replace(/\/$/, ''), fetch, load})
-    .then(r => console.log(`audit: ${r.confirmed} confirmed, ${r.corrected} corrected, ${r.skipped} skipped`))
-    .catch(e => { console.error(e); process.exit(1); });
+  const db = d1(account, database, token), site = (SITE_URL || 'https://oakle.day').replace(/\/$/, '');
+  (async () => {
+    const total = {confirmed: 0, corrected: 0, skipped: 0};
+    for (let round = 0; round < 30; round++) { // batches of 10 until nothing is pending (or 300 wins, then the next run continues)
+      const r = await audit(db, {site, fetch, load});
+      total.confirmed += r.confirmed; total.corrected += r.corrected; total.skipped += r.skipped;
+      if (r.confirmed + r.corrected + r.skipped === 0) break;
+    }
+    console.log(`audit: ${total.confirmed} confirmed, ${total.corrected} corrected, ${total.skipped} skipped`);
+  })().catch(e => { console.error(e); process.exit(1); });
 }

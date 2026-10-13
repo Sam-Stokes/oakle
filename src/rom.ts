@@ -110,9 +110,12 @@ export async function romId(rom: Uint8Array): Promise<string> {
   return [...h.subarray(0, 8)].map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+/** Fingerprint of one day's data (trainer, dice, party): a log is only evidence against the data it was played with. */
+export const dayId = (d: {trainer: number; rng: number[]; party: number[][]}) => romId(new TextEncoder().encode(JSON.stringify([d.trainer, d.rng, d.party])));
+
 // ---- replay
-const TAIL_FRAMES = 900;   // game time allowed after the last input for the result to appear (15 s)
-const SLICE_FRAMES = 6;
+const TAIL_FRAMES = 18_000; // game time allowed after the last input for the result to appear (5 minutes; real ones take ~1 s)
+const SLICE_FRAMES = 30;
 
 /**
  * Plays the log back from power-on and returns what the game itself wrote as the result.

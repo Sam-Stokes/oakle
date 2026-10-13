@@ -1,10 +1,12 @@
-# Replays new wins on the real game and corrects any that do not reproduce (the Worker runs with VERIFY = "audit").
+# Replays new wins on the real game and voids any that do not reproduce (the Worker runs with VERIFY = "audit").
+# The Worker starts this job itself right after a win (worker/kick.ts); the timer below is only a backup. GitHub warns
+# that scheduled runs can be late or skipped, most of all on the hour and quarter-hours, so it uses quiet minutes.
 # Needs three repository secrets: CLOUDFLARE_API_TOKEN (D1 edit), CLOUDFLARE_ACCOUNT_ID, D1_DATABASE_ID.
 # Optional repository variable SITE_URL if the game is not at https://oakle.day. Without the secrets it does nothing.
 name: audit
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '7,22,37,52 * * * *'
   workflow_dispatch:
 concurrency: audit
 jobs:

@@ -4,7 +4,7 @@
 import {existsSync, readFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
 import {beforeAll, describe, expect, it} from 'vitest';
-import {decodeLog, encodeLog, InputLog, patchRom, readParty, readResult, replay, romId, TICKS_PER_MS, type Button, type Day, type Result} from '../src/rom';
+import {dayId, decodeLog, encodeLog, InputLog, patchRom, readParty, readResult, replay, romId, TICKS_PER_MS, type Button, type Day, type Result} from '../src/rom';
 import {audit, type Db} from './audit';
 
 const ROM = new URL('../public/rom/oakle.gbc', import.meta.url);
@@ -98,25 +98,42 @@ describe.skipIf(!ready)('a real battle', () => {
     const fakeFetch = (async (u: string) => (files[new URL(u).pathname] ? new Response(files[new URL(u).pathname]) : new Response('no', {status: 404}))) as unknown as typeof fetch;
     const id = await romId(new Uint8Array(readFileSync(ROM)));
     const add = (player: string, evidence: object | string) => sql.prepare(`INSERT INTO runs VALUES (?, ?, ?, 1, 12, 3, ?, 0)`).run(player, day.day, 1, typeof evidence === 'string' ? evidence : JSON.stringify(evidence));
-    const proof = {name: 'TEST', rom: id, log: encodeLog(log)};
-    add('liar', proof);                              // claims a win; the game says it was not one
-    add('liar2', {...proof, name: 'OTHER'});         // a second row on a different ROM patch: every replay needs its own module
-    add('garbage', {...proof, log: 'not base64!'});  // malformed evidence
-    add('oldrom', {...proof, rom: 'deadbeefdeadbeef'}); // played on another build: cannot be judged
+    const dayCfg = await dayId(day);
+    const proof = {name: 'TEST', rom: id, cfg: dayCfg, log: encodeLog(log)};
     const row = (p: string) => sql.prepare(`SELECT finished_at, won, turns, alive, verified, log IS NULL AS nolog FROM runs WHERE player_id = ?`).get(p);
+    const pending = () => (sql.prepare(`SELECT COUNT(*) AS n FROM runs WHERE verified = 0`).get() as any).n;
+    const reset = () => sql.exec('DELETE FROM runs');
+    // a log that is only a marker: the injected replay treats it as "this one reproduces"
+    const honestLog = encodeLog([0, 0]);
+    const replayFn = async (newModule: () => Promise<any>, r: Uint8Array, ev: number[], d: number) =>
+      ev.length === 2 ? {won: true, turns: 9, alive: 2} : replay(newModule, r, ev, d);
+    const run = (fn = replayFn) => audit(db, {site, fetch: fakeFetch, load, replayFn: fn}, () => {});
 
-    const out = await audit(db, {site, fetch: fakeFetch, load}, () => {});
-    expect(out).toEqual({confirmed: 0, corrected: 3, skipped: 1});
+    // 1) a mixed batch: the ones that do not reproduce are voided, the ones that do are confirmed
+    add('honest', {...proof, log: honestLog});
+    add('liar', proof);                                  // claims a win; the game says it was not one
+    add('liar2', {...proof, name: 'OTHER'});             // a second row on a different ROM patch: every replay needs its own module
+    add('garbage', {...proof, log: 'not base64!'});      // malformed evidence
+    add('oldrom', {...proof, rom: 'deadbeefdeadbeef'}); // played on another build: cannot be judged
+    add('olddata', {...proof, cfg: 'not-this-day'});     // played with different day data: cannot be judged
+    expect(await run()).toEqual({confirmed: 1, corrected: 3, skipped: 2});
+    expect(row('honest')).toMatchObject({won: 1, turns: 9, alive: 2, verified: 1, nolog: 1});
     // not a win on replay: void (unfinished, counted nowhere), never turned into a loss, evidence kept
     for (const p of ['liar', 'liar2', 'garbage']) expect(row(p), p).toMatchObject({finished_at: null, won: null, turns: null, alive: null, verified: 3, nolog: 0});
-    expect(row('oldrom')).toMatchObject({won: 1, verified: 2}); // cannot be judged: stays as claimed
+    for (const p of ['oldrom', 'olddata']) expect(row(p), p).toMatchObject({won: 1, verified: 2}); // cannot be judged: stays as claimed
+    expect(await run()).toEqual({confirmed: 0, corrected: 0, skipped: 0}); // nothing pending
 
-    // a win the replay reproduces is confirmed with the game's own numbers and its evidence dropped
-    add('honest', proof);
-    const out2 = await audit(db, {site, fetch: fakeFetch, load, replayFn: async () => ({won: true, turns: 9, alive: 2})}, () => {});
-    expect(out2.confirmed).toBe(1);
-    expect(row('honest')).toMatchObject({won: 1, turns: 9, alive: 2, verified: 1, nolog: 1});
-    expect(await audit(db, {site, fetch: fakeFetch, load}, () => {})).toEqual({confirmed: 0, corrected: 0, skipped: 0}); // nothing pending
+    // 2) circuit breaker: several wins failing and none confirming looks like a fault, so nothing is voided
+    reset();
+    add('a', proof); add('b', {...proof, name: 'OTHER'}); add('c', {...proof, name: 'THIRD'});
+    await expect(run()).rejects.toThrow(/suspicious/);
+    expect(pending()).toBe(3);
+    for (const p of ['a', 'b', 'c']) expect(row(p), p).toMatchObject({finished_at: 1, won: 1, verified: 0});
+
+    // 3) ...but one or two failures are voided as usual
+    reset();
+    add('a', proof); add('b', {...proof, name: 'OTHER'});
+    expect(await run()).toEqual({confirmed: 0, corrected: 2, skipped: 0});
   }, 300_000);
 });
 

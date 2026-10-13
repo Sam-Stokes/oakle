@@ -1,14 +1,14 @@
 import './style.css';
 import {dayNumber, dayStart, TZ} from './day';
 import {Emu, loadBinjgb, type Button} from './emu';
-import {encodeLog, patchRom, readResult, romId, type Day as RomDay} from './rom';
+import {dayId, encodeLog, patchRom, readResult, romId, type Day as RomDay} from './rom';
 import {shareText, type Party} from './share';
 
 type Mon = {species: string; moves: string[]};
 type Day = RomDay & {team: Mon[]};
 // log/romName/romId: the replay evidence for a finished battle, kept until the server has accepted it. voided: the
 // battle does not count (finished after its day ended, or not verifiable): neither a win nor a loss.
-type Run = {started?: boolean; done?: boolean; won?: boolean; turns?: number; alive?: number; late?: boolean; synced?: boolean; forfeit?: boolean; log?: string; romName?: string; romId?: string; voided?: boolean; party?: Party};
+type Run = {started?: boolean; done?: boolean; won?: boolean; turns?: number; alive?: number; late?: boolean; synced?: boolean; forfeit?: boolean; log?: string; romName?: string; romId?: string; cfgId?: string; voided?: boolean; party?: Party};
 type Save = {id: string; name: string; runs: Record<number, Run>};
 
 // ?test (optionally &day=N), localhost only: own save slot, no server, no one-try lock, for checking the ROM.
@@ -412,12 +412,12 @@ function ready(resume: boolean) {
 async function submit(run: Run) {
   try {
     if (!run.started) { const s = await api('start', {id: save.id, name: save.name, day}); run.started = s.status === 200 || s.status === 409; }
-    const r = await api('finish', {id: save.id, day, won: !!run.won, turns: run.turns ?? 0, alive: run.alive ?? 0, name: run.romName, rom: run.romId, log: run.log});
+    const r = await api('finish', {id: save.id, day, won: !!run.won, turns: run.turns ?? 0, alive: run.alive ?? 0, name: run.romName, rom: run.romId, cfg: run.cfgId, log: run.log});
     if (r.status === 200) { // the server's result is the one that counts
       if (r.data.void) Object.assign(run, {voided: true, forfeit: true, won: false, turns: 0, alive: 0});
       else if (typeof r.data.won === 'boolean') Object.assign(run, {won: r.data.won, turns: r.data.turns, alive: r.data.alive});
     }
-    if (r.status === 200 || r.status === 409) { run.synced = true; delete run.log; delete run.romName; delete run.romId; persist(); }
+    if (r.status === 200 || r.status === 409) { run.synced = true; delete run.log; delete run.romName; delete run.romId; delete run.cfgId; persist(); }
   } catch { /* retried next load */ }
 }
 
@@ -452,7 +452,8 @@ async function play(resume: boolean) {
     const res = readResult(emu.extRam(), day);
     if (res) {
       const run = save.runs[day];
-      Object.assign(run, {done: true, ...res, party: emu.party(), log: encodeLog(emu.input.log), romName: emu.romName, romId: emu.romId});
+      const cfgId = await dayId(today).catch(() => ''); // which day data this battle was played with
+      Object.assign(run, {done: true, ...res, party: emu.party(), log: encodeLog(emu.input.log), romName: emu.romName, romId: emu.romId, cfgId});
       haltGame();
       persist(); await submit(run);
       result();
