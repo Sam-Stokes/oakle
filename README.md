@@ -44,12 +44,15 @@ Some days are brutal on purpose.
 
 ## Share your result
 
+When your battle is over you can copy a spoiler-free result card to share, in the spirit of Wordle:
+
 ```
-Oakle #12 ✅ 9 turns
-🟩🟩🟩🟥🟥
+Oakle #12 — I beat Oak in 18 turns
+🟩🟩🟨🟥⬛
+https://oakle.day
 ```
 
-Each square is one of your five Pokémon. Green means it was still standing at the end.
+Each square is one of your five Pokémon, in team order: ⬛ fainted, 🟥 almost out, 🟨 half health, 🟩 healthy. It shows how the battle went without giving away your team or your moves.
 
 ## Fair play
 
@@ -62,3 +65,7 @@ Oakle is an unofficial fan project. It is not affiliated with, endorsed by or sp
 ## License
 
 [MIT](LICENSE). Third-party components keep their own licenses, listed in [NOTICE](NOTICE).
+
+## Questions or bugs?
+
+Found a bug or have an idea? [Open an issue on GitHub](https://github.com/Sam-Stokes/oakle/issues), or find me on X: [@stokescodes](https://x.com/stokescodes).

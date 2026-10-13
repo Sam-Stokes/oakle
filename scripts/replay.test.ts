@@ -4,7 +4,7 @@
 import {existsSync, readFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
 import {beforeAll, describe, expect, it} from 'vitest';
-import {decodeLog, encodeLog, InputLog, patchRom, readResult, replay, romId, TICKS_PER_MS, type Button, type Day, type Result} from '../src/rom';
+import {decodeLog, encodeLog, InputLog, patchRom, readParty, readResult, replay, romId, TICKS_PER_MS, type Button, type Day, type Result} from '../src/rom';
 import {audit, type Db} from './audit';
 
 const ROM = new URL('../public/rom/oakle.gbc', import.meta.url);
@@ -34,7 +34,7 @@ describe('input log codec', () => {
 
 const ready = existsSync(ROM) && existsSync(DAYS);
 describe.skipIf(!ready)('a real battle', () => {
-  let rom: Uint8Array, day: Day, config: number, input: InputLog, live: Result | null, log: number[];
+  let rom: Uint8Array, day: Day, config: number, input: InputLog, live: Result | null, log: number[], party: Array<[number, number]>;
   const {load} = createRequire(import.meta.url)('./emu.cjs');
 
   beforeAll(async () => {
@@ -69,11 +69,16 @@ describe.skipIf(!ready)('a real battle', () => {
       if (i % 50 === 0) live = readResult(a.extRam(), day.day);
     }
     live = readResult(a.extRam(), day.day);
+    party = readParty(addr => m._emulator_read_mem(e, addr));
     log = decodeLog(encodeLog(input.log))!;
   }, 300_000);
 
   it('replays to the same result, resume included, and rejects a tampered log', async () => {
     expect(live, 'the bot should finish a battle (try another seed if the ROM changed)').not.toBeNull();
+    // the party read from game memory agrees with the result block the ROM wrote
+    expect(party).toHaveLength(5);
+    expect(party.filter(([hp]) => hp > 0)).toHaveLength(live!.alive);
+    expect(party.every(([, max]) => max > 0)).toBe(true);
     // a different module instance and sample rate than the original run
     expect(await replay(load, rom, log, day.day)).toEqual(live);
     // tampering: dropping a stretch of inputs must not reproduce the result

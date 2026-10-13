@@ -5,7 +5,7 @@ const AUDIO_FRAMES = 4096, AUDIO_LATENCY_SEC = 0.1;
 const EVENT_NEW_FRAME = 1, EVENT_AUDIO_BUFFER_FULL = 2, EVENT_UNTIL_TICKS = 4;
 const CGB_COLOR_CURVE = 2; // Gambatte-style colours
 
-import {InputLog, TICKS_PER_MS, type Button} from './rom';
+import {InputLog, readParty, TICKS_PER_MS, type Button} from './rom';
 export type {Button};
 
 let script: Promise<void> | undefined;
@@ -106,6 +106,8 @@ export class Emu {
   setMuted(muted: boolean) { this.gain.gain.value = muted ? 0 : 1; }
 
   private set = (setter: string, down: boolean) => this.m[setter](this.e, down);
+  /** [hp, maxHp] for each Pokemon in the player's party right now. */
+  party() { return readParty(a => this.m._emulator_read_mem(this.e, a)); }
   press(b: Button, down: boolean) { this.input.press(b, down, this.m._emulator_get_ticks_f64(this.e), this.set); }
 
   private draw() {

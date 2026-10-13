@@ -2,12 +2,13 @@ import './style.css';
 import {dayNumber, dayStart, TZ} from './day';
 import {Emu, loadBinjgb, type Button} from './emu';
 import {encodeLog, patchRom, readResult, romId, type Day as RomDay} from './rom';
+import {shareText, type Party} from './share';
 
 type Mon = {species: string; moves: string[]};
 type Day = RomDay & {team: Mon[]};
 // log/romName/romId: the replay evidence for a finished battle, kept until the server has accepted it. voided: the
 // battle does not count (finished after its day ended, or not verifiable): neither a win nor a loss.
-type Run = {started?: boolean; done?: boolean; won?: boolean; turns?: number; alive?: number; late?: boolean; synced?: boolean; forfeit?: boolean; log?: string; romName?: string; romId?: string; voided?: boolean};
+type Run = {started?: boolean; done?: boolean; won?: boolean; turns?: number; alive?: number; late?: boolean; synced?: boolean; forfeit?: boolean; log?: string; romName?: string; romId?: string; voided?: boolean; party?: Party};
 type Save = {id: string; name: string; runs: Record<number, Run>};
 
 // ?test (optionally &day=N), localhost only: own save slot, no server, no one-try lock, for checking the ROM.
@@ -119,7 +120,8 @@ function buildShell() {
         <details class="card link" id="link"></details>
         <details class="card how" id="how"></details>
       </aside>
-    </div>`;
+    </div>
+    <footer class="foot">Found a bug or have a question? <a href="https://github.com/Sam-Stokes/oakle/issues" target="_blank" rel="noopener">GitHub issues</a> or <a href="https://x.com/stokescodes" target="_blank" rel="noopener">@stokescodes</a> on X</footer>`;
 
   // buttons: pointer events so thumbs can hold several at once (touch-action: none in CSS)
   app.querySelectorAll<HTMLButtonElement>('[data-b]').forEach(btn => {
@@ -187,8 +189,9 @@ function stats() {
 
 function renderRecord() {
   const run = save.runs[day], s = stats(), done = !!run?.done;
-  const alive = run?.alive ?? 0;
-  const share = `Oakle #${day}${run?.late ? ' (archive)' : ''} ${run?.won ? '✅' : '❌'} ${run?.turns} turns\n${'🟩'.repeat(alive)}${'🟥'.repeat(5 - alive)}`;
+  const share = run?.done && !run.voided
+    ? shareText({day, late: !!run.late, won: !!run.won, turns: run.turns ?? 0, alive: run.alive ?? 0, party: run.party, link: location.origin})
+    : '';
   $('#record').innerHTML = `<h2>Your record</h2>
     <p class="who" id="who">Playing as <b>${esc(save.name || '...')}</b> <button class="linkbtn" id="rename">Change name</button></p>
     <div class="stats"><div><b>${s.played}</b><span>played</span></div><div><b>${s.wins}</b><span>won</span></div><div><b>${s.pct}%</b><span>win rate</span></div><div><b>${s.streak}</b><span>streak</span></div></div>
@@ -222,7 +225,7 @@ function renderRecord() {
 const updateCountdown = () => {
   const t = Math.max(0, Math.floor((dayStart(current + 1) - Date.now()) / 1000)), p = (n: number) => String(n).padStart(2, '0');
   const el = document.getElementById('next');
-  if (el) el.textContent = `New battle at midnight, ${TZ.split('/')[1].replace('_', ' ')} time. In ${p(Math.floor(t / 3600))}:${p(Math.floor(t / 60) % 60)}:${p(t % 60)}`;
+  if (el) el.textContent = `Next battle in ${p(Math.floor(t / 3600))}:${p(Math.floor(t / 60) % 60)}:${p(t % 60)}`;
   if (!t && !TEST) location.reload();
 };
 
@@ -445,7 +448,7 @@ async function play(resume: boolean) {
     const res = readResult(emu.extRam(), day);
     if (res) {
       const run = save.runs[day];
-      Object.assign(run, {done: true, ...res, log: encodeLog(emu.input.log), romName: emu.romName, romId: emu.romId});
+      Object.assign(run, {done: true, ...res, party: emu.party(), log: encodeLog(emu.input.log), romName: emu.romName, romId: emu.romId});
       haltGame();
       persist(); await submit(run);
       result();

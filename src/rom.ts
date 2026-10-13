@@ -33,6 +33,13 @@ export function readResult(ram: Uint8Array, day: number): Result | null {
   return {won: ram[RESULT_AT + 5] === 1, turns: ram[RESULT_AT + 6], alive: ram[RESULT_AT + 9]};
 }
 
+/** The player's party as [hp, maxHp] pairs, read through `read` (one byte of the Game Boy's address space). */
+export function readParty(read: (addr: number) => number): Array<[number, number]> {
+  const PARTY_COUNT = 0xd162, PARTY = 0xd16a, MON_LEN = 44, HP = 1, MAX_HP = 34; // wPartyCount, wPartyMons in the Yellow RAM map
+  const word = (a: number) => (read(a) << 8) | read(a + 1);
+  return Array.from({length: Math.min(read(PARTY_COUNT), 6)}, (_, i) => [word(PARTY + i * MON_LEN + HP), word(PARTY + i * MON_LEN + MAX_HP)] as [number, number]);
+}
+
 // ---- input log: every button change with the emulator's exact tick, so a battle can be replayed bit for bit.
 export const BUTTONS = ['up', 'down', 'left', 'right', 'a', 'b', 'start', 'select'] as const;
 export type Button = (typeof BUTTONS)[number];

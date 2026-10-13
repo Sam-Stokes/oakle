@@ -202,3 +202,8 @@ details.card summary small { color: var(--dim); font: 400 12px/1.4 var(--ui); ma
 #whoerr { grid-column: 1 / -1; }
 
 a.ov-btn { display: inline-block; text-decoration: none; }
+
+/* ---- footer: small, quiet, at the very bottom */
+.foot { color: var(--dim); font-size: 13px; text-align: center; padding: 4px 0 0; }
+.foot a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+.foot a:hover { color: var(--ink); }
