@@ -114,11 +114,13 @@ const TAIL_FRAMES = 900;   // game time allowed after the last input for the res
 const SLICE_FRAMES = 6;
 
 /**
- * Plays the log back from power-on on a fresh emulator and returns what the game itself wrote as the result.
- * `m` is an instantiated binjgb module. `rom` must be patched exactly as the player's was (same day, same name).
- * Null when the game never produced a result for `day`.
+ * Plays the log back from power-on and returns what the game itself wrote as the result.
+ * `newModule` makes a brand-new binjgb module: a second emulator on a module that has already run one does not behave
+ * like the first (it drifts by a few ticks), and the player's game was the first on its module. `rom` must be patched
+ * exactly as the player's was (same day, same name). Null when the game never produced a result for `day`.
  */
-export function replay(m: any, rom: Uint8Array, log: number[], day: number): Result | null {
+export async function replay(newModule: () => Promise<any>, rom: Uint8Array, log: number[], day: number): Promise<Result | null> {
+  const m = await newModule();
   const size = (rom.length + 0x7fff) & ~0x7fff;
   const ptr = m._malloc(size);
   const heap = new Uint8Array(m.HEAP8.buffer, ptr, size);

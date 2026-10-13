@@ -8,15 +8,23 @@ const CGB_COLOR_CURVE = 2; // Gambatte-style colours
 import {InputLog, TICKS_PER_MS, type Button} from './rom';
 export type {Button};
 
-let modulePromise: Promise<any> | undefined;
-/** binjgb.js is a classic script that defines a global `Binjgb`, so load it with a tag. */
-export const loadBinjgb = () => (modulePromise ??= new Promise<any>((res, rej) => {
-  const s = document.createElement('script');
-  s.src = '/emu/binjgb.js';
-  s.onload = () => window.Binjgb().then(res, rej);
-  s.onerror = () => rej(new Error('could not load the emulator'));
-  document.head.append(s);
-}));
+let script: Promise<void> | undefined;
+/**
+ * binjgb.js is a classic script that defines a global `Binjgb`, so load it with a tag (once). Every call returns a
+ * brand-new module: an emulator is only reproducible as the first one on its module, and the server replays
+ * recorded games on fresh modules.
+ */
+export const loadBinjgb = async () => {
+  script ??= new Promise<void>((res, rej) => {
+    const s = document.createElement('script');
+    s.src = '/emu/binjgb.js';
+    s.onload = () => res();
+    s.onerror = () => { script = undefined; rej(new Error('could not load the emulator')); };
+    document.head.append(s);
+  });
+  await script;
+  return window.Binjgb();
+};
 
 export class Emu {
   private e: number;

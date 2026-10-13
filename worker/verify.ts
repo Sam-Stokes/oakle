@@ -6,8 +6,8 @@ import {decodeLog, patchRom, replay, romId, withinClock, type Day, type Result} 
 
 const DAYS_PER_FILE = 50;
 
-let module: Promise<any> | undefined;
-const load = () => (module ??= Binjgb({instantiateWasm(imports: any, done: (i: WebAssembly.Instance) => void) { WebAssembly.instantiate(wasm, imports).then(done); return {}; }}));
+// a new instance every time: an emulator is only reproducible as the first one on its module (see replay in src/rom.ts)
+const load = () => Binjgb({instantiateWasm(imports: any, done: (i: WebAssembly.Instance) => void) { WebAssembly.instantiate(wasm, imports).then(done); return {}; }});
 let rom: Promise<{bytes: Uint8Array; at: number; id: string}> | undefined;
 
 /**
@@ -24,5 +24,5 @@ export async function verify(assets: {fetch: typeof fetch}, origin: string, day:
   const [{bytes, at, id}, chunk] = await Promise.all([rom, get(`/days/${Math.floor((day - 1) / DAYS_PER_FILE)}.json`).then(r => r.json() as Promise<{days: Day[]}>)]);
   if (clientRom !== id) return 'stale';
   const d = chunk.days.find(x => x.day === day);
-  return d ? replay(await load(), patchRom(bytes, at, d, name), events, day) : null;
+  return d ? replay(load, patchRom(bytes, at, d, name), events, day) : null;
 }

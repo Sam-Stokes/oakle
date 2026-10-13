@@ -24,7 +24,6 @@ export async function audit(db: Db, {site, fetch, load, replayFn = replay, batch
   const rom = new Uint8Array(await (await get('/rom/oakle.gbc')).arrayBuffer());
   const {config} = (await (await get('/rom/oakle.json')).json()) as {config: number};
   const id = await romId(rom);
-  const m = await load();
   const chunks = new Map<number, Promise<Day[]>>();
   const days = (n: number) => { const k = Math.floor((n - 1) / 50); if (!chunks.has(k)) chunks.set(k, get(`/days/${k}.json`).then(r => r.json()).then((j: any) => j.days)); return chunks.get(k)!; };
 
@@ -39,7 +38,7 @@ export async function audit(db: Db, {site, fetch, load, replayFn = replay, batch
     const events = evidence ? decodeLog(evidence.log) : null;
     const d = (await days(day)).find(x => x.day === day);
     if (events && !d) { await skip('no data for that day'); continue; }
-    const res: Result | null = events && d ? replayFn(m, patchRom(rom, config, d, String(evidence.name ?? '')), events, day) : null;
+    const res: Result | null = events && d ? await replayFn(load, patchRom(rom, config, d, String(evidence.name ?? '')), events, day) : null;
     if (res?.won) { // the game itself says it was a win; its numbers replace the claimed ones
       await db.all(`UPDATE runs SET turns = ${res.turns | 0}, alive = ${res.alive | 0}, verified = 1, log = NULL ${where}`, [row.player_id]);
       out.confirmed++; log(`day ${day} ${who}: confirmed, ${res.turns} turns`);

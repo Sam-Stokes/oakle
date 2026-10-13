@@ -56,10 +56,11 @@ const idbSet = async (k: string, v: Saved) => { const db = await idb(); db.trans
 
 // ---- preload: fetch the emulator, ROM and config at page load, and build the (paused) emulator as soon as the name
 // is known, so pressing BATTLE only has to start it. The AudioContext is resumed by that click.
-let assets: Promise<[any, ArrayBuffer, {config: number}]> | null = null;
-const loadAssets = () => (assets ??= Promise.all([loadBinjgb(), fetch('/rom/oakle.gbc').then(r => r.arrayBuffer()), fetch('/rom/oakle.json').then(r => r.json())]));
+let assets: Promise<[ArrayBuffer, {config: number}]> | null = null;
+const loadAssets = () => (assets ??= Promise.all([fetch('/rom/oakle.gbc').then(r => r.arrayBuffer()), fetch('/rom/oakle.json').then(r => r.json())]));
 let prepared: Promise<Emu> | null = null;
-const prepare = (warm = true) => (prepared ??= loadAssets().then(async ([mod, rom, meta]) => {
+// every emulator gets its own fresh module (loadBinjgb), never one that already ran a game
+const prepare = (warm = true) => (prepared ??= Promise.all([loadBinjgb(), loadAssets()]).then(async ([mod, [rom, meta]]) => {
   const e = new Emu(mod, patchRom(new Uint8Array(rom), meta.config, today, save.name), $<HTMLCanvasElement>('#screen'));
   e.romName = save.name;
   e.romId = await romId(new Uint8Array(rom)).catch(() => ''); // needs a secure context; '' just means "not auditable"
@@ -418,13 +419,19 @@ async function play(resume: boolean) {
   emu.setMuted(muted);
   if (resume) {
     const saved = await idbGet(stateKey(day));
-    if (!saved?.log || !emu.loadState(saved.state, saved.log)) { // the saved game is gone: that counts as a loss, no rerolls
-      const run = save.runs[day];
-      Object.assign(run, {done: true, won: false, turns: 0, alive: 0, forfeit: true});
-      persist(); haltGame(); await submit(run); return result();
+    if (saved?.rom && saved.rom !== emu.romId) {
+      // The game was updated since this battle began, and a save state only works on the ROM it came from. Not the
+      // player's fault, so the battle simply starts again on the new ROM.
+      await emu.warm();
+    } else {
+      if (!saved?.log || !emu.loadState(saved.state, saved.log)) { // the saved game is gone: that counts as a loss, no rerolls
+        const run = save.runs[day];
+        Object.assign(run, {done: true, won: false, turns: 0, alive: 0, forfeit: true});
+        persist(); haltGame(); await submit(run); return result();
+      }
+      emu.romName = saved.name; // the replay must use the name and ROM this game was started with
+      emu.romId = saved.rom;
     }
-    emu.romName = saved.name; // the replay must use the name and ROM this game was started with
-    emu.romId = saved.rom;
   }
   emu.start();
   overlay(null);
@@ -455,7 +462,7 @@ function result() {
     ? `<p class="big">NOT<br>VERIFIED</p><p class="dim">THE REPLAY DID NOT MATCH.<br>RECORDED AS A LOSS</p>`
     : lost
     ? `<p class="big">ALREADY<br>BATTLED</p><p class="dim">ONE TRY PER DAY</p>`
-    : `<p class="big">${run.won ? 'YOU WON!' : 'OAK WINS'}</p><p>${run.turns} TURNS${run.alive != null ? `, ${run.alive} LEFT` : ''}</p><p class="dim">${archive ? 'PICK ANOTHER DAY IN THE ARCHIVE' : 'COME BACK TOMORROW'}</p>`);
+    : `<p class="big">${run.won ? 'YOU WON!' : 'OAK WINS'}</p><p>${run.turns} TURN${run.turns === 1 ? '' : 'S'} TAKEN</p>${run.alive != null ? `<p>${run.alive} POKEMON LEFT</p>` : ''}<p class="dim">${archive ? 'PICK ANOTHER DAY IN THE ARCHIVE' : 'COME BACK TOMORROW'}</p>`);
   renderRecord(); renderArchive(); loadBoard();
 }
 

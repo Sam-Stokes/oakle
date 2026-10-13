@@ -74,10 +74,10 @@ describe.skipIf(!ready)('a real battle', () => {
 
   it('replays to the same result, resume included, and rejects a tampered log', async () => {
     expect(live, 'the bot should finish a battle (try another seed if the ROM changed)').not.toBeNull();
-    const b = await boot(Buffer.from(rom)); // a different module instance and sample rate than the original run
-    expect(replay(b.m, rom, log, day.day)).toEqual(live);
+    // a different module instance and sample rate than the original run
+    expect(await replay(load, rom, log, day.day)).toEqual(live);
     // tampering: dropping a stretch of inputs must not reproduce the result
-    expect(replay(b.m, rom, log.slice(0, 400).concat(log.slice(800)), day.day)).not.toEqual(live);
+    expect(await replay(load, rom, log.slice(0, 400).concat(log.slice(800)), day.day)).not.toEqual(live);
     expect(log[log.length - 2] / TICKS_PER_MS).toBeGreaterThan(60_000);
   }, 300_000);
 
@@ -95,19 +95,21 @@ describe.skipIf(!ready)('a real battle', () => {
     const add = (player: string, evidence: object | string) => sql.prepare(`INSERT INTO runs VALUES (?, ?, ?, 1, 12, 3, ?, 0)`).run(player, day.day, 1, typeof evidence === 'string' ? evidence : JSON.stringify(evidence));
     const proof = {name: 'TEST', rom: id, log: encodeLog(log)};
     add('liar', proof);                              // claims a win; the game says it was not one
+    add('liar2', {...proof, name: 'OTHER'});         // a second row on a different ROM patch: every replay needs its own module
     add('garbage', {...proof, log: 'not base64!'});  // malformed evidence
     add('oldrom', {...proof, rom: 'deadbeefdeadbeef'}); // played on another build: cannot be judged
     const row = (p: string) => sql.prepare(`SELECT won, turns, alive, verified, log IS NULL AS nolog FROM runs WHERE player_id = ?`).get(p);
 
     const out = await audit(db, {site, fetch: fakeFetch, load}, () => {});
-    expect(out).toEqual({confirmed: 0, corrected: 2, skipped: 1});
+    expect(out).toEqual({confirmed: 0, corrected: 3, skipped: 1});
     expect(row('liar')).toMatchObject({won: 0, turns: live!.turns, alive: live!.alive, verified: 1, nolog: 0});
+    expect(row('liar2')).toMatchObject({won: 0, turns: live!.turns, alive: live!.alive, verified: 1}); // a reused module would give turns 0
     expect(row('garbage')).toMatchObject({won: 0, turns: 0, alive: 0, verified: 1});
     expect(row('oldrom')).toMatchObject({won: 1, verified: 2});
 
     // a win the replay reproduces is confirmed with the game's own numbers and its evidence dropped
     add('honest', proof);
-    const out2 = await audit(db, {site, fetch: fakeFetch, load, replayFn: () => ({won: true, turns: 9, alive: 2})}, () => {});
+    const out2 = await audit(db, {site, fetch: fakeFetch, load, replayFn: async () => ({won: true, turns: 9, alive: 2})}, () => {});
     expect(out2.confirmed).toBe(1);
     expect(row('honest')).toMatchObject({won: 1, turns: 9, alive: 2, verified: 1, nolog: 1});
     expect(await audit(db, {site, fetch: fakeFetch, load}, () => {})).toEqual({confirmed: 0, corrected: 0, skipped: 0}); // nothing pending
