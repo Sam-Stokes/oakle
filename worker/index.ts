@@ -5,6 +5,7 @@ import {decodeLog} from '../src/rom';
 import {cleanCode, cleanName, isBlocked, makeCode, streaks} from './stats';
 import {verify} from './verify';
 import {kickAudit} from './kick';
+import {notify} from './discord';
 
 const json = (o: unknown, status = 200) => new Response(JSON.stringify(o), {status, headers: {
   'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'strict-transport-security': 'max-age=31536000',
@@ -65,8 +66,35 @@ const boardRows = async (db: any, day: number) => {
 };
 declare const HTMLRewriter: any; // Workers runtime global (no @cloudflare/workers-types in this project)
 
+type Env = {DB: any; ASSETS: {fetch: typeof fetch}; FLOOD?: {limit(o: {key: string}): Promise<{success: boolean}>}; VERIFY?: string; GITHUB_TOKEN?: string; GITHUB_REPO?: string; DISCORD_WEBHOOK?: string};
+type Ctx = {waitUntil(p: Promise<unknown>): void};
+const WHEN = (day: number, current: number) => day === current ? 'today' : `on Oakle #${day}`;
+
+/** Discord note for a win: where it lands on that day's board. Called after the run is saved. */
+async function announceWin(db: any, env: Env, id: string, day: number, v: {turns: number; alive: number}, current: number) {
+  const r = await db.prepare(`SELECT (SELECT name FROM players WHERE id = ?) AS name, 1 + COUNT(*) AS rank FROM runs
+    WHERE day = ? AND won = 1 AND player_id != ? AND (turns < ? OR (turns = ? AND alive >= ?))`).bind(id, day, id, v.turns, v.turns, v.alive).first();
+  if (!r?.name) return;
+  const name = isBlocked(r.name) ? '???' : r.name;
+  await notify(env, r.rank === 1
+    ? `🥇 **${name}** takes #1 ${WHEN(day, current)}: ${v.turns} turns, ${v.alive} left`
+    : `**${name}** beat Oak in ${v.turns} turns, ${v.alive} left. #${r.rank} ${WHEN(day, current)}`);
+}
+
 export default {
-  async fetch(req: Request, env: {DB: any; ASSETS: {fetch: typeof fetch}; FLOOD?: {limit(o: {key: string}): Promise<{success: boolean}>}; VERIFY?: string; GITHUB_TOKEN?: string; GITHUB_REPO?: string}, ctx: {waitUntil(p: Promise<unknown>): void}) {
+  /** Hourly cron: the moment the day rolls over (Auckland), post the finished day's recap. */
+  async scheduled(_event: unknown, env: Env, ctx: Ctx) {
+    const now = Date.now(), n = dayNumber(new Date(now));
+    if (!env.DISCORD_WEBHOOK || n < 2 || dayNumber(new Date(now - 3_600_000)) === n) return;
+    ctx.waitUntil((async () => {
+      await ensureSchema(env.DB);
+      const [board, count] = await boardRows(env.DB, n - 1);
+      const top = board.results.slice(0, 3).map((r: any, i: number) => `${i + 1}. ${isBlocked(r.name) ? '???' : r.name}, ${r.turns} turns`);
+      await notify(env, `**Oakle #${n - 1} recap:** ${count.won} of ${count.played} beat Oak.${top.length ? '\n' + top.join('\n') : ''}`);
+    })().catch((e) => console.error('recap error', e)));
+  },
+
+  async fetch(req: Request, env: Env, ctx: Ctx) {
     const url = new URL(req.url), db = env.DB;
     const ip = req.headers.get('CF-Connecting-IP') ?? 'local';
 
@@ -124,7 +152,7 @@ export default {
           day, current,
           played: count.played, won: count.won,
           today: board.results.slice(0, TOP).map(pub), todayRank: rank(board.results),
-          allTime: all.results.slice(0, TOP).map(pub), allTimeRank: rank(all.results),
+          allTime: all.results.slice(0, TOP).map(pub), allTimeRank: rank(all.results), allTimeTotal: all.results.length,
           streaks: streakRows.slice(0, TOP).map(pub), streakRank: rank(streakRows), you: id ? st.get(id) ?? {current: 0, best: 0} : null,
           bestStreaks: bestRows.slice(0, TOP).map(pub),
         });
@@ -160,9 +188,11 @@ export default {
         if (isBlocked(name)) return json({error: 'blocked'}, 400);
         const taken = await db.prepare(`SELECT 1 AS t FROM players WHERE name = ? COLLATE NOCASE AND id != ?`).bind(name, body.id).first();
         if (taken) return json({error: 'taken'}, 409);
+        const known = await db.prepare(`SELECT 1 AS k FROM players WHERE id = ?`).bind(body.id).first();
         await db.prepare(`INSERT INTO players (id, name, created_at) VALUES (?, ?, ?)
                           ON CONFLICT(id) DO UPDATE SET name = excluded.name`).bind(body.id, name, now).run();
         boards.clear();
+        if (!known) ctx.waitUntil(notify(env, `New trainer: **${name}**`).catch((e) => console.error('discord error', e)));
         return json({name});
       }
 
@@ -235,6 +265,7 @@ export default {
         await db.prepare(`UPDATE runs SET finished_at = ?, won = ?, turns = ?, alive = ?, log = ?, verified = ? WHERE player_id = ? AND day = ?`)
           .bind(now, verdict.won ? 1 : 0, verdict.turns, verdict.alive, evidence, verified, body.id, day).run();
         boards.clear();
+        if (verdict.won && env.DISCORD_WEBHOOK) ctx.waitUntil(announceWin(db, env, body.id, day, verdict, current).catch((e) => console.error('discord error', e)));
         if (verified === 0) ctx.waitUntil(kickAudit(env).catch((e) => console.error('audit dispatch error', e))); // audit this win now
         return json(verdict);
       }

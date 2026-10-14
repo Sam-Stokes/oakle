@@ -29,6 +29,12 @@ VERIFY = "0"
 #   sh scripts/wrangler.sh secret put GITHUB_TOKEN
 # GITHUB_REPO = "your-name/oakle"
 
+# Discord feed (worker/discord.ts): wins, new #1, new trainers, and a recap when the day rolls over. Create a webhook in
+# Server settings > Integrations > Webhooks, then: sh scripts/wrangler.sh secret put DISCORD_WEBHOOK
+# The hourly cron below only posts the recap at the moment the day rolls over.
+[triggers]
+crons = ["1 * * * *"]
+
 # Logs: view with `npx wrangler tail oakle` or in the dashboard.
 [observability]
 enabled = true
