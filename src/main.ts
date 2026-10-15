@@ -441,12 +441,13 @@ async function dcStart(mode: "link" | "signin"): Promise<string> {
     return "Offline. Try again.";
   }
 }
+// Linking happens from "Play on another device" (Sign in with Discord links an unlinked trainer); here a link only shows.
 const discordRow = () =>
-  `<p class="muted" id="dc">${
+  `${
     discord
-      ? `<span class="dc-on">${DISCORD_ICON}Discord: <b>${esc(discord.name)}</b></span> <button class="linkbtn" id="dcunlink">Unlink</button>${discord.member ? "" : ` <a href="${DISCORD}" target="_blank" rel="noopener">Join the server</a> <button class="linkbtn" id="dclink">Refresh</button>`}`
-      : `Restore your trainer on any device. <button class="linkbtn" id="dclink">${DISCORD_ICON}Link Discord</button>`
-  }</p>${dcMsg ? `<p class="muted" id="dcmsg">${esc(dcMsg)}</p>` : ""}`;
+      ? `<p class="muted" id="dc"><span class="dc-on">${DISCORD_ICON}Discord: <b>${esc(discord.name)}</b></span> <button class="linkbtn" id="dcunlink">Unlink</button>${discord.member ? "" : ` <a href="${DISCORD}" target="_blank" rel="noopener">Join the server</a> <button class="linkbtn" id="dclink">Refresh</button>`}</p>`
+      : ""
+  }${dcMsg ? `<p class="muted" id="dcmsg">${esc(dcMsg)}</p>` : ""}`;
 
 function renderRecord() {
   const run = save.runs[day],
@@ -464,7 +465,7 @@ function renderRecord() {
         })
       : "";
   $("#record").innerHTML = `<h2>Your record</h2>
-    <p class="who" id="who">Playing as <b>${esc(save.name || "...")}</b> <button class="linkbtn" id="rename">Change name</button></p>
+    <p class="who" id="who">Playing as <b>${esc(save.name || "...")}</b></p>
     ${discordRow()}
     <div class="stats"><div><b>${s.played}</b><span>played</span></div><div><b>${s.wins}</b><span>won</span></div><div><b>${s.pct}%</b><span>win rate</span></div><div><b>${s.streak}</b><span>streak</span></div></div>
     ${done && !run.forfeit ? `<p class="today">${run.won ? "You beat Prof. Oak" : "Prof. Oak won"} in ${run.turns} turns${run.alive != null ? `, ${run.alive} of 5 left` : ""}</p><button class="btn" id="share">Share result</button>` : ""}
@@ -486,41 +487,6 @@ function renderRecord() {
     } catch {
       /* cancelled */
     }
-  });
-  document.getElementById("rename")?.addEventListener("click", () => {
-    $("#who").innerHTML =
-      `<span class="nameform"><input id="newname" maxlength="7" value="${esc(save.name)}" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="New name"><button class="btn" id="savename">Save</button></span><span class="muted" id="whoerr">1 to 7 letters or numbers. Must be unique.</span>`;
-    const input = $<HTMLInputElement>("#newname");
-    input.focus();
-    input.select();
-    const save_ = async () => {
-      const name = cleanName(input.value);
-      if (!name) {
-        $("#whoerr").textContent = "Use letters or numbers.";
-        return;
-      }
-      if (name === save.name) return renderRecord();
-      const r = await claimName(name);
-      if (r !== "ok") {
-        $("#whoerr").textContent = NAME_ERR[r]
-          .toLowerCase()
-          .replace(/^./, (c) => c.toUpperCase());
-        return;
-      }
-      save.name = name;
-      persist();
-      renderRecord();
-      loadBoard();
-      if (document.getElementById("go") && !emu) {
-        prepared = null;
-        ready(readyResume, readyPractice);
-      } // the game must be rebuilt with the new name
-    };
-    $("#savename").onclick = save_;
-    input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") save_();
-      if (e.key === "Escape") renderRecord();
-    });
   });
   document.getElementById("dclink")?.addEventListener("click", async () => {
     dcMsg = await dcStart("link");
@@ -819,7 +785,7 @@ function renderLink(msg = "") {
   const wasOpen = el.open || !!live || !!msg;
   el.innerHTML = `<summary>Play on another device</summary>
     <p class="muted">Take your record to your phone or laptop. No sign-up.</p>
-    <button class="btn ghost" id="dcin">Sign in with Discord</button><p class="muted">Replaces the trainer on this device with the one linked to your Discord.</p>
+    <button class="btn ghost" id="dcin">Sign in with Discord</button><p class="muted">Links this trainer to your Discord. If your Discord already has a trainer, this device switches to it.</p>
     ${live ? `<div class="code" aria-live="polite">${pairCode!.code}</div><p class="muted">Enter this on the other device within 10 minutes. It works once.</p>` : ""}
     ${msg ? `<p class="muted">${esc(msg)}</p>` : ""}
     <button class="btn" id="getcode">${live ? "New code" : "Get a code"}</button>
@@ -856,8 +822,6 @@ function renderLink(msg = "") {
   };
 }
 
-let readyResume = false,
-  readyPractice = false;
 // Practice: after the one counted try the same day can be played again. It never touches the record, the server or the
 // saved game: no save.runs write, no /api/start or /api/finish, no save state.
 const AGAIN = `<button class="ov-btn" id="again">PLAY AGAIN</button><p class="dim">PRACTICE: DOES NOT COUNT</p><a class="ov-link" href="${DISCORD}" target="_blank" rel="noopener">${DISCORD_ICON}SHARE YOUR RESULT IN THE DISCORD</a>`;
@@ -870,8 +834,6 @@ const bindAgain = () => {
     };
 };
 function ready(resume: boolean, practice = false) {
-  readyResume = resume;
-  readyPractice = practice;
   overlay(
     `<p class="big">OAKLE #${day}</p><p>${esc(save.name)}, PROF. OAK IS WAITING</p><button class="ov-btn" id="go" disabled>LOADING</button><p class="dim">${practice ? "PRACTICE: DOES NOT COUNT" : archive ? "ARCHIVE: ONE TRY PER DAY" : "ONE TRY A DAY"}</p>`,
   );

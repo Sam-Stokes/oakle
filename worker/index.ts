@@ -124,7 +124,11 @@ async function discordCallback(req: Request, url: URL, env: Env, db: any, now: n
       await db.prepare(`UPDATE players SET discord_id = ?, discord_name = ?, discord_member = ? WHERE id = ?`).bind(me.id, name, member, row.player_id).run();
       return back('discord=linked');
     }
-    if (!owner) return back('discord=none');
+    if (!owner) { // this Discord has no trainer yet: link it to the one asking, if that trainer has none
+      if (!row.player_id) return back('discord=none');
+      const linked = await db.prepare(`UPDATE players SET discord_id = ?, discord_name = ?, discord_member = ? WHERE id = ? AND discord_id IS NULL`).bind(me.id, name, member, row.player_id).run();
+      return back(linked.meta.changes ? 'discord=linked' : 'discord=none');
+    }
     await db.prepare(`UPDATE players SET discord_name = ?, discord_member = ? WHERE id = ?`).bind(name, member, owner.id).run();
     await db.prepare(`DELETE FROM pairs WHERE player_id = ? OR expires_at < ?`).bind(owner.id, now).run();
     for (let i = 0; i < 5; i++) { // the existing one-time code is how a device adopts a trainer
@@ -245,10 +249,11 @@ export default {
         if (!env.DISCORD_CLIENT_ID || !env.DISCORD_CLIENT_SECRET) return json({error: 'not configured'}, 503);
         if (await limited(db, `discord:${ip}`, 20)) return json({error: 'slow down'}, 429);
         const mode = body.mode === 'link' ? 'link' : 'signin';
-        if (mode === 'link' && !(ID.test(body.id) && await db.prepare(`SELECT 1 AS k FROM players WHERE id = ?`).bind(body.id).first())) return json({error: 'pick a name first'}, 400);
+        const known = ID.test(body.id) ? await db.prepare(`SELECT 1 AS k FROM players WHERE id = ?`).bind(body.id).first() : null;
+        if (mode === 'link' && !known) return json({error: 'pick a name first'}, 400);
         await db.prepare(`DELETE FROM oauth_states WHERE expires_at < ?`).bind(now).run();
         const state = [...crypto.getRandomValues(new Uint8Array(24))].map(b => b.toString(16).padStart(2, '0')).join('');
-        await db.prepare(`INSERT INTO oauth_states (state, player_id, mode, expires_at) VALUES (?, ?, ?, ?)`).bind(state, mode === 'link' ? body.id : null, mode, now + PAIR_TTL_MS).run();
+        await db.prepare(`INSERT INTO oauth_states (state, player_id, mode, expires_at) VALUES (?, ?, ?, ?)`).bind(state, known ? body.id : null, mode, now + PAIR_TTL_MS).run();
         const q = new URLSearchParams({client_id: env.DISCORD_CLIENT_ID, redirect_uri: `${url.origin}/api/discord/callback`, response_type: 'code', scope: 'identify guilds', state, prompt: 'none'});
         // the cookie ties the callback to the browser that started it (blocks someone else's link being completed by a victim)
         return json({url: `https://discord.com/oauth2/authorize?${q}`}, 200, {'set-cookie': `${STATE_COOKIE}=${state}; Max-Age=600; Path=/api/discord; HttpOnly; Secure; SameSite=Lax`});
@@ -266,9 +271,10 @@ export default {
         const name = cleanName(body.name);
         if (!name) return json({error: 'invalid'}, 400);
         if (isBlocked(name)) return json({error: 'blocked'}, 400);
+        const known = await db.prepare(`SELECT name FROM players WHERE id = ?`).bind(body.id).first();
+        if (known && known.name !== name && known.name !== 'RED') return json({error: 'locked'}, 409); // a name is final ('RED' is only the placeholder for a missing one)
         const taken = await db.prepare(`SELECT 1 AS t FROM players WHERE name = ? COLLATE NOCASE AND id != ?`).bind(name, body.id).first();
         if (taken) return json({error: 'taken'}, 409);
-        const known = await db.prepare(`SELECT 1 AS k FROM players WHERE id = ?`).bind(body.id).first();
         await db.prepare(`INSERT INTO players (id, name, created_at) VALUES (?, ?, ?)
                           ON CONFLICT(id) DO UPDATE SET name = excluded.name`).bind(body.id, name, now).run();
         boards.clear();

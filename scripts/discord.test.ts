@@ -97,11 +97,11 @@ describe('Worker hooks', () => {
     expect(t.results()).toEqual([]);
     expect(t.text('🥇')).toHaveLength(1);
   });
-  it('a new trainer posts once, not on rename, start or re-login', async () => {
+  it('a new trainer posts once, and a name cannot be changed afterwards', async () => {
     const t = await setup();
     await t.call('/api/name', {id: id('a'), name: 'ASH'});
     await t.call('/api/name', {id: id('a'), name: 'ASH'});
-    await t.call('/api/name', {id: id('a'), name: 'ASH2'});
+    expect((await t.call('/api/name', {id: id('a'), name: 'ASH2'})).status).toBe(409); // names are final
     await t.call('/api/start', {id: id('a'), name: 'ASH2', day: TODAY});
     await t.call(`/api/me?id=${id('a')}`);
     expect(t.text('New trainer')).toEqual(['New trainer: **ASH**']);

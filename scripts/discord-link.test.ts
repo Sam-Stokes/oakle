@@ -86,6 +86,19 @@ describe('Discord link', () => {
     expect((await t.call('/api/claim', {code})).status).toBe(404); // single use
   });
 
+  it('signing in with an unlinked account links the trainer that asked, but never re-points a linked one', async () => {
+    let who: object = {id: DID, global_name: 'Sam', username: 'sam_x'};
+    const t = await setup(ENV, undefined, (url: string) => discord(who)(url));
+    await t.call('/api/name', {id: id('a'), name: 'ASH'});
+    const first = await begin(t, 'signin', 'a');
+    expect(where(await finish(t, first.state, first.cookie))).toBe('?discord=linked');
+    expect(await (await t.call(`/api/me?id=${id('a')}`)).json()).toMatchObject({discord: {name: 'Sam'}});
+    who = {id: '223456789012345678', global_name: 'Other', username: 'other_x'}; // a second Discord account on the same trainer
+    const second = await begin(t, 'signin', 'a');
+    expect(where(await finish(t, second.state, second.cookie))).toBe('?discord=none');
+    expect(await (await t.call(`/api/me?id=${id('a')}`)).json()).toMatchObject({discord: {name: 'Sam'}});
+  });
+
   it('signing in with an account that is not linked finds nothing', async () => {
     const t = await setup(ENV, undefined, discord());
     const s = await begin(t, 'signin');
