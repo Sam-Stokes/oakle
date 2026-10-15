@@ -851,7 +851,7 @@ function renderLink(msg = "") {
 
 // Practice: after the one counted try the same day can be played again. It never touches the record, the server or the
 // saved game: no save.runs write, no /api/start or /api/finish, no save state.
-const AGAIN = `<button class="ov-btn" id="again">PLAY AGAIN</button><p class="dim">PRACTICE: DOES NOT COUNT</p><a class="ov-link" href="${DISCORD}" target="_blank" rel="noopener">${DISCORD_ICON}SHARE YOUR RESULT IN THE DISCORD</a>`;
+const AGAIN = `<button class="ov-btn" id="again">PLAY AGAIN</button><p class="dim">PRACTICE: DOES NOT COUNT</p>`;
 const bindAgain = () => {
   const b = document.getElementById("again");
   if (b)
