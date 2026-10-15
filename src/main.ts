@@ -512,7 +512,7 @@ async function loadStats() {
     const { status, data } = await api("stats");
     if (status !== 200 || typeof data.trainers !== "number") return;
     const n = (v: number, one: string) => `${v.toLocaleString()} ${one}${v === 1 ? "" : "s"}`;
-    $("#live").textContent = `${n(data.trainers, "trainer")} · ${n(data.games, "game")} played`;
+    $("#live").textContent = `${n(data.trainers, "trainer")} | ${n(data.games, "game")} played`;
   } catch {
     /* offline: the line stays as it was */
   }
