@@ -5,7 +5,8 @@ import {decodeLog} from '../src/rom';
 import {cleanCode, cleanName, isBlocked, makeCode, streaks} from './stats';
 import {verify} from './verify';
 import {kickAudit} from './kick';
-import {notify} from './discord';
+import {md, notify} from './discord';
+import {rowFrom, shareText} from '../src/share';
 
 const json = (o: unknown, status = 200) => new Response(JSON.stringify(o), {status, headers: {
   'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'strict-transport-security': 'max-age=31536000',
@@ -66,7 +67,7 @@ const boardRows = async (db: any, day: number) => {
 };
 declare const HTMLRewriter: any; // Workers runtime global (no @cloudflare/workers-types in this project)
 
-type Env = {DB: any; ASSETS: {fetch: typeof fetch}; FLOOD?: {limit(o: {key: string}): Promise<{success: boolean}>}; VERIFY?: string; GITHUB_TOKEN?: string; GITHUB_REPO?: string; DISCORD_WEBHOOK?: string};
+type Env = {DB: any; ASSETS: {fetch: typeof fetch}; FLOOD?: {limit(o: {key: string}): Promise<{success: boolean}>}; VERIFY?: string; GITHUB_TOKEN?: string; GITHUB_REPO?: string; DISCORD_WEBHOOK?: string; DISCORD_RESULTS_WEBHOOK?: string};
 type Ctx = {waitUntil(p: Promise<unknown>): void};
 const WHEN = (day: number, current: number) => day === current ? 'today' : `on Oakle #${day}`;
 
@@ -75,10 +76,18 @@ async function announceWin(db: any, env: Env, id: string, day: number, v: {turns
   const r = await db.prepare(`SELECT (SELECT name FROM players WHERE id = ?) AS name, 1 + COUNT(*) AS rank FROM runs
     WHERE day = ? AND won = 1 AND player_id != ? AND (turns < ? OR (turns = ? AND alive >= ?))`).bind(id, day, id, v.turns, v.turns, v.alive).first();
   if (!r?.name) return;
-  const name = isBlocked(r.name) ? '???' : r.name;
+  const name = md(isBlocked(r.name) ? '???' : r.name);
   await notify(env, r.rank === 1
     ? `🥇 **${name}** takes #1 ${WHEN(day, current)}: ${v.turns} turns, ${v.alive} left`
     : `**${name}** beat Oak in ${v.turns} turns, ${v.alive} left. #${r.rank} ${WHEN(day, current)}`);
+}
+
+/** The player's share card, for the results channel: same layout as the page's Share button, with their name. */
+async function postResult(db: any, env: Env, id: string, day: number, v: {won: boolean; turns: number; alive: number}, squares: unknown, current: number, origin: string) {
+  const r = await db.prepare(`SELECT name FROM players WHERE id = ?`).bind(id).first();
+  if (!r?.name) return;
+  const who = `**${md(isBlocked(r.name) ? '???' : r.name)}**`;
+  await notify({DISCORD_WEBHOOK: env.DISCORD_RESULTS_WEBHOOK}, shareText({day, late: day < current, won: v.won, turns: v.turns, alive: v.alive, who, row: rowFrom(squares, v.alive), link: `<${origin}>`}));
 }
 
 export default {
@@ -89,7 +98,7 @@ export default {
     ctx.waitUntil((async () => {
       await ensureSchema(env.DB);
       const [board, count] = await boardRows(env.DB, n - 1);
-      const top = board.results.slice(0, 3).map((r: any, i: number) => `${i + 1}. ${isBlocked(r.name) ? '???' : r.name}, ${r.turns} turns`);
+      const top = board.results.slice(0, 3).map((r: any, i: number) => `${i + 1}. ${md(isBlocked(r.name) ? '???' : r.name)}, ${r.turns} turns`);
       await notify(env, `**Oakle #${n - 1} recap:** ${count.won} of ${count.played} beat Oak.${top.length ? '\n' + top.join('\n') : ''}`);
     })().catch((e) => console.error('recap error', e)));
   },
@@ -192,7 +201,7 @@ export default {
         await db.prepare(`INSERT INTO players (id, name, created_at) VALUES (?, ?, ?)
                           ON CONFLICT(id) DO UPDATE SET name = excluded.name`).bind(body.id, name, now).run();
         boards.clear();
-        if (!known) ctx.waitUntil(notify(env, `New trainer: **${name}**`).catch((e) => console.error('discord error', e)));
+        if (!known) ctx.waitUntil(notify(env, `New trainer: **${md(name)}**`).catch((e) => console.error('discord error', e)));
         return json({name});
       }
 
@@ -266,6 +275,7 @@ export default {
           .bind(now, verdict.won ? 1 : 0, verdict.turns, verdict.alive, evidence, verified, body.id, day).run();
         boards.clear();
         if (verdict.won && env.DISCORD_WEBHOOK) ctx.waitUntil(announceWin(db, env, body.id, day, verdict, current).catch((e) => console.error('discord error', e)));
+        if (env.DISCORD_RESULTS_WEBHOOK) ctx.waitUntil(postResult(db, env, body.id, day, verdict, body.sq, current, url.origin).catch((e) => console.error('discord error', e)));
         if (verified === 0) ctx.waitUntil(kickAudit(env).catch((e) => console.error('audit dispatch error', e))); // audit this win now
         return json(verdict);
       }

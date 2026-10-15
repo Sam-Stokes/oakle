@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {shareText} from '../src/share';
+import {bands, rowFrom, shareText} from '../src/share';
 import {readParty} from '../src/rom';
 
 const base = {day: 1, late: false, link: 'https://oakle.day'};
@@ -15,6 +15,26 @@ describe('share text', () => {
   });
   it('falls back to the count of survivors when the party was not recorded', () => {
     expect(shareText({...base, won: true, turns: 12, alive: 2})).toBe('Oakle #1 — I beat Oak in 12 turns\n🟩🟩⬛⬛⬛\nhttps://oakle.day');
+  });
+});
+
+describe('result card for the Discord post', () => {
+  const party: [number, number][] = [[0, 300], [20, 300], [100, 300], [250, 300], [300, 300]];
+  it('bands: one digit per Pokemon (0 fainted .. 3 healthy), only for a full party of five', () => {
+    expect(bands(party)).toBe('01233');
+    expect(bands(undefined)).toBe('');
+    expect(bands([[1, 2]])).toBe('');
+  });
+  it('rowFrom: uses the squares when they match the survivor count, else the count', () => {
+    expect(rowFrom('01233', 4)).toBe('⬛🟥🟨🟩🟩');
+    expect(rowFrom('01233', 3)).toBe('🟩🟩🟩⬛⬛'); // does not add up
+    expect(rowFrom('0123', 3)).toBe('🟩🟩🟩⬛⬛'); // wrong length
+    expect(rowFrom('abcde', 0)).toBe('⬛⬛⬛⬛⬛');
+    expect(rowFrom(undefined, 2)).toBe('🟩🟩⬛⬛⬛');
+  });
+  it('names the player when it is not their own card', () => {
+    expect(shareText({...base, won: true, turns: 1, alive: 5, who: '**ASH**', row: '🟩🟩🟩🟩🟩', link: '<https://oakle.day>'}))
+      .toBe('Oakle #1 — **ASH** beat Oak in 1 turn\n🟩🟩🟩🟩🟩\n<https://oakle.day>');
   });
 });
 

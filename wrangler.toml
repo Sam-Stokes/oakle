@@ -32,6 +32,8 @@ VERIFY = "0"
 # Discord feed (worker/discord.ts): wins, new #1, new trainers, and a recap when the day rolls over. Create a webhook in
 # Server settings > Integrations > Webhooks, then: sh scripts/wrangler.sh secret put DISCORD_WEBHOOK
 # The hourly cron below only posts the recap at the moment the day rolls over.
+# Optional second webhook, on the results channel: every finished battle (win or loss) is posted there as the share card.
+#   sh scripts/wrangler.sh secret put DISCORD_RESULTS_WEBHOOK
 [triggers]
 crons = ["1 * * * *"]
 
