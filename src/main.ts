@@ -655,11 +655,16 @@ async function main() {
     dcMsg = "That sign-in expired. Try again.";
   }
   if (dcResult) dcMsg = DC_MSG[dcResult] ?? "";
-  if (!TEST)
-    document.addEventListener(
-      "visibilitychange",
-      () => dayNumber() !== current && location.reload(),
-    );
+  // A tab left open past midnight must move to the new day. The 1-second countdown does it while timers run; these cover
+  // a tab that was asleep or frozen (phone, laptop lid) the moment it is shown again, restored from the back/forward
+  // cache, or back online.
+  if (!TEST) {
+    const newDay = () => {
+      if (dayNumber() !== current) location.reload();
+    };
+    document.addEventListener("visibilitychange", newDay);
+    for (const ev of ["focus", "pageshow", "online"]) addEventListener(ev, newDay);
+  }
   if (!save.id) save.id = hex();
   if (!save.runs[day]?.done)
     loadAssets().catch(() => {
