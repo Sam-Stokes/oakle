@@ -218,6 +218,7 @@ function buildShell() {
       <div class="title">
         <h1>OAKLE <span>#${day}</span>${archive ? '<em class="badge">ARCHIVE</em>' : ""}</h1>
         <p>${esc(dateOf(day))}. ${archive ? `<a href="${TEST ? "?test" : "./"}">Back to today (#${current})</a>` : "Beat Professor Oak. One try a day."}</p>
+        <p class="live" id="live"></p>
       </div>
       <div class="tools">
         <button class="chip" id="mute" aria-pressed="${muted}" aria-label="Sound">${muted ? "SOUND OFF" : "SOUND ON"}</button>
@@ -420,7 +421,7 @@ let dcMsg = "";
 const DC_MSG: Record<string, string> = {
   linked: "Discord linked.",
   taken: "That Discord account is already linked to another trainer.",
-  none: "No trainer is linked to that Discord account yet. Link it from your record first.",
+  none: "No trainer is linked to that Discord account yet. Pick a name, then sign in with Discord again to link it.",
   error: "Discord sign-in did not work. Try again.",
 };
 /** Asks the server for the Discord authorize link and goes there. Returns a message only when it could not. */
@@ -505,6 +506,18 @@ function renderRecord() {
   updateCountdown();
 }
 
+// The small live line under the title: every trainer, and every game played (archive plays included).
+async function loadStats() {
+  try {
+    const { status, data } = await api("stats");
+    if (status !== 200 || typeof data.trainers !== "number") return;
+    const n = (v: number, one: string) => `${v.toLocaleString()} ${one}${v === 1 ? "" : "s"}`;
+    $("#live").textContent = `${n(data.trainers, "trainer")} · ${n(data.games, "game")} played`;
+  } catch {
+    /* offline: the line stays as it was */
+  }
+}
+
 const updateCountdown = () => {
   const t = Math.max(
       0,
@@ -539,6 +552,7 @@ function renderArchive() {
 }
 
 let boardTab: "day" | "all" | "streak" = "day";
+let boardAll = false; // phones show the top 10 until "Show all"
 let boardData: any = null;
 async function loadBoard() {
   $("#board").innerHTML = `<h2>Leaderboard</h2><p class="muted">Loading...</p>`;
@@ -557,9 +571,11 @@ function renderBoard() {
     return;
   }
   const d = boardData;
+  const cap = matchMedia("(max-width: 919px)").matches && !boardAll ? 10 : Infinity;
   const rows = (list: any[], cols: (r: any) => string[]) =>
     list?.length
       ? `<table>${list
+          .slice(0, cap)
           .map(
             (r, i) =>
               `<tr class="${r.me ? "me" : ""}"><td>${i + 1}</td><td>${esc(r.name)}</td>${cols(
@@ -568,7 +584,7 @@ function renderBoard() {
                 .map((c) => `<td>${c}</td>`)
                 .join("")}</tr>`,
           )
-          .join("")}</table>`
+          .join("")}</table>${list.length > cap ? `<button class="linkbtn" id="boardmore">Show all ${list.length}</button>` : ""}`
       : '<p class="muted">Nobody yet.</p>';
   // a number over its label, so "2" and "now" never run together as "2now"
   const num = (n: unknown, label: string, hot = false) =>
@@ -607,6 +623,10 @@ function renderBoard() {
   el.innerHTML = `<h2>Leaderboard</h2>
     <div class="tabs">${tab("day", archive ? "This day" : "Today")}${tab("all", "All time")}${tab("streak", "Streaks")}</div>
     ${body}${you ? `<p class="you">${you}</p>` : ""}`;
+  document.getElementById("boardmore")?.addEventListener("click", () => {
+    boardAll = true;
+    renderBoard();
+  });
   el.querySelectorAll<HTMLButtonElement>(".tab").forEach(
     (b) =>
       (b.onclick = () => {
@@ -649,6 +669,13 @@ async function main() {
   const data: { days: Day[] } = chunk.ok ? await chunk.json() : { days: [] };
   buildShell();
   setInterval(updateCountdown, 1000);
+  loadStats();
+  setInterval(() => {
+    if (!document.hidden) loadStats();
+  }, 30_000);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) loadStats();
+  });
   const d = data.days.find((x) => x.day === day);
   if (!d) {
     overlay(
@@ -721,7 +748,7 @@ function askName() {
   return new Promise<void>((res) => {
     const nameForm = () => {
       overlay(
-        `<p class="big">OAKLE #${day}</p><p>PICK A NAME</p><input id="n" maxlength="7" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Your name"><p class="dim" id="nerr">1 TO 7 LETTERS OR NUMBERS.<br>SHOWN ON THE LEADERBOARD.</p><button class="ov-btn" id="ok">OK</button><button class="ov-link" id="have">I ALREADY PLAY ON ANOTHER DEVICE</button><button class="ov-link" id="dcin">${DISCORD_ICON}SIGN IN WITH DISCORD</button>`,
+        `<p class="big">OAKLE #${day}</p><p>PICK A NAME</p><input id="n" maxlength="7" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Your name"><p class="dim" id="nerr">1 TO 7 LETTERS OR NUMBERS.<br>SHOWN ON THE LEADERBOARD.</p><button class="ov-btn" id="ok">OK</button><button class="ov-link" id="have">I ALREADY PLAY ON ANOTHER DEVICE</button>`,
       );
       $("#n").addEventListener("keydown", (e) => {
         if ((e as KeyboardEvent).key === "Enter") $("#ok").click();
@@ -748,14 +775,10 @@ function askName() {
         res();
       };
       $("#have").onclick = codeForm;
-      $("#dcin").onclick = async () => {
-        const m = await dcStart("signin");
-        if (m) $("#nerr").textContent = m.toUpperCase();
-      };
     };
     const codeForm = () => {
       overlay(
-        `<p class="big">LINK DEVICE</p><p>ENTER THE CODE SHOWN ON YOUR OTHER DEVICE</p><input id="c" maxlength="7" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Code"><p class="dim" id="cerr">&nbsp;</p><button class="ov-btn" id="cok">LINK</button><button class="ov-link" id="back">BACK</button>`,
+        `<p class="big">LINK DEVICE</p><p>ENTER THE CODE SHOWN ON YOUR OTHER DEVICE</p><input id="c" maxlength="7" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Code"><p class="dim" id="cerr">&nbsp;</p><button class="ov-btn" id="cok">LINK</button><button class="ov-link" id="dcin">${DISCORD_ICON}SIGN IN WITH DISCORD</button><button class="ov-link" id="back">BACK</button>`,
       );
       const go = async () => {
         if (!(await claim($<HTMLInputElement>("#c").value)))
@@ -767,6 +790,10 @@ function askName() {
         if ((e as KeyboardEvent).key === "Enter") go();
       });
       $("#cok").onclick = go;
+      $("#dcin").onclick = async () => {
+        const m = await dcStart("signin");
+        if (m) $("#cerr").textContent = m.toUpperCase();
+      };
       $("#back").onclick = nameForm;
     };
     nameForm();
@@ -785,7 +812,7 @@ function renderLink(msg = "") {
   const wasOpen = el.open || !!live || !!msg;
   el.innerHTML = `<summary>Play on another device</summary>
     <p class="muted">Take your record to your phone or laptop. No sign-up.</p>
-    <button class="btn ghost" id="dcin">Sign in with Discord</button><p class="muted">Links this trainer to your Discord. If your Discord already has a trainer, this device switches to it.</p>
+    <button class="btn ghost" id="dcin">Sign in with Discord</button><p class="muted">${save.name ? "Links this trainer to your Discord. If your Discord already has a trainer, this device switches to it." : "Already play? Sign in with Discord to bring your trainer to this device."}</p>
     ${live ? `<div class="code" aria-live="polite">${pairCode!.code}</div><p class="muted">Enter this on the other device within 10 minutes. It works once.</p>` : ""}
     ${msg ? `<p class="muted">${esc(msg)}</p>` : ""}
     <button class="btn" id="getcode">${live ? "New code" : "Get a code"}</button>
@@ -1022,6 +1049,7 @@ async function play(resume: boolean, practice = false) {
 }
 
 function result() {
+  loadStats(); // this battle is in the count now
   const run = save.runs[day];
   $("#console").dataset.on = "false";
   const lost = run.forfeit && run.alive === undefined; // someone else (another device) already played this day

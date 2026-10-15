@@ -70,6 +70,9 @@ const boardRows = async (db: any, day: number) => {
   boards.set(day, {at: Date.now(), rows});
   return rows;
 };
+// Site-wide counters for the little live line on the page: a few COUNTs, shared for a few seconds per Worker instance.
+let siteStats: {at: number; body: any} | null = null;
+const STATS_TTL_MS = 10_000;
 declare const HTMLRewriter: any; // Workers runtime global (no @cloudflare/workers-types in this project)
 
 type Env = {DB: any; ASSETS: {fetch: typeof fetch}; FLOOD?: {limit(o: {key: string}): Promise<{success: boolean}>}; VERIFY?: string; GITHUB_TOKEN?: string; GITHUB_REPO?: string; DISCORD_WEBHOOK?: string; DISCORD_RESULTS_WEBHOOK?: string; DISCORD_CLIENT_ID?: string; DISCORD_CLIENT_SECRET?: string; DISCORD_GUILD_ID?: string};
@@ -198,6 +201,15 @@ export default {
         const r = await db.prepare(`SELECT day, won, turns, alive, late FROM runs WHERE player_id = ? AND finished_at IS NOT NULL ORDER BY day`).bind(id).all();
         const p = await db.prepare(`SELECT discord_id, discord_name, discord_member FROM players WHERE id = ?`).bind(id).first();
         return json({runs: r.results, discord: p?.discord_id ? {name: p.discord_name, member: !!p.discord_member} : null});
+      }
+
+      // ---- every trainer, and every finished game (archive plays included; abandoned starts are not)
+      if (url.pathname === '/api/stats') {
+        if (!siteStats || Date.now() - siteStats.at > STATS_TTL_MS) {
+          const all = await db.prepare(`SELECT (SELECT COUNT(*) FROM players) AS trainers, (SELECT COUNT(*) FROM runs WHERE finished_at IS NOT NULL) AS games`).first();
+          siteStats = {at: Date.now(), body: {trainers: all.trainers, games: all.games}};
+        }
+        return json(siteStats.body, 200, {'cache-control': 'public, max-age=10'});
       }
 
       // ---- leaderboards: the chosen day, all time, streaks, plus where the asking player stands

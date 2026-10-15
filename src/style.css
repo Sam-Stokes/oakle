@@ -240,3 +240,27 @@ a.card.discord .dc { width: 30px; height: 30px; color: #5865f2; }
 /* ---- Discord link row in the record card */
 .linkbtn .dc, .dc-on .dc { vertical-align: -0.2em; margin-right: 5px; }
 .dc-on .dc { color: #5865f2; }
+
+/* ---- the small live counters under the title */
+.title .live { color: var(--dim); font-size: 12px; font-variant-numeric: tabular-nums; margin-top: -4px; }
+.title .live:empty { display: none; }
+
+/* ---- the start screens must fit a phone-sized game screen (about 320px tall): less air, smaller controls */
+@media (max-width: 560px) {
+  .overlay { gap: 10px; padding: 4%; line-height: 1.7; }
+  .overlay input { padding: 10px 8px; }
+  .ov-btn { padding: 12px 18px; }
+  .overlay .ov-link { padding: 3px; line-height: 1.5; }
+}
+
+/* ---- one column (phones, small tablets), ordered for playing: game, record, your team, Oak's team, leaderboard, Discord, the rest.
+   The containers become transparent so every card can be ordered on its own; wider screens keep their columns. */
+@media (max-width: 919px) {
+  .grid { grid-template-areas: none; }
+  .stage, .side { display: contents; }
+  .stage > .screen-frame { order: 1; justify-self: center; }
+  .stage > .pad, .stage > .keys { order: 2; justify-self: center; }
+  .stage > .card, .side > .card { width: min(100%, 560px); justify-self: center; }
+  .record { order: 3; } .team { order: 4; } .oak { order: 5; } .board { order: 6; }
+  .discord { order: 7; } .archive { order: 8; } .link { order: 9; } .how { order: 10; }
+}
