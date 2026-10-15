@@ -1,14 +1,13 @@
 // The Discord feed: notify() itself, text escaping, and the three Worker hooks (new trainer, win/#1, recap).
 // No network: fetch is stubbed and D1 is a small shim over node:sqlite.
-import {createRequire} from 'node:module';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {md, notify} from '../worker/discord';
 import {dayStart} from '../src/day';
+import {HOOK, RESULTS, ROLLOVER, TODAY, id, setup} from './harness';
 
 vi.mock('../worker/verify', () => ({verify: async () => null})); // the real one imports the emulator's wasm
 
-const HOOK = 'https://discord.test/api/webhooks/1/secret-token';
-const RESULTS = 'https://discord.test/api/webhooks/2/results-token';
+const box = (s: string) => '```\n' + s + '\n```'; // a result card is one code block
 
 describe('notify', () => {
   const calls: {url: string; init: any}[] = [];
@@ -53,48 +52,6 @@ describe('md (player text made inert)', () => {
   });
 });
 
-// ---- Worker hooks, against an in-memory D1
-const {DatabaseSync} = createRequire(import.meta.url)('node:sqlite');
-function d1() {
-  const sql = new DatabaseSync(':memory:');
-  const stmt = (q: string, args: unknown[] = []): any => ({
-    bind: (...a: unknown[]) => stmt(q, a),
-    run: async () => ({meta: {changes: Number(sql.prepare(q).run(...args).changes)}}),
-    first: async () => sql.prepare(q).get(...args) ?? null,
-    all: async () => ({results: sql.prepare(q).all(...args)}),
-  });
-  return {sql, prepare: (q: string) => stmt(q), batch: async (list: any[]) => { for (const s of list) await s.run(); }};
-}
-
-const id = (c: string) => c.repeat(16); // player ids are 16+ hex characters
-const TODAY = 5, ROLLOVER = dayStart(TODAY);
-
-async function setup(env: Record<string, unknown> = {DISCORD_WEBHOOK: HOOK, DISCORD_RESULTS_WEBHOOK: RESULTS}, hook: (url: string, init: any) => Promise<any> = async () => ({ok: true, status: 204})) {
-  vi.resetModules(); // a fresh Worker module: its schema and board caches start empty
-  const {default: worker} = await import('../worker/index');
-  const db = d1(), sent: any[] = [];
-  const fetchMock = vi.fn(async (url: string, init: any) => { sent.push({...JSON.parse(init.body), url}); return hook(url, init); });
-  vi.stubGlobal('fetch', fetchMock);
-  const pending: Promise<unknown>[] = [];
-  const ctx = {waitUntil: (p: Promise<unknown>) => { pending.push(p); }};
-  const e = {DB: db, ASSETS: {fetch: async () => new Response('')}, ...env} as any;
-  const flush = () => Promise.all(pending.splice(0)); // rejects if a background post threw
-  const call = async (path: string, body?: unknown) => {
-    const r = await worker.fetch(new Request('https://oakle.test' + path, body ? {method: 'POST', body: JSON.stringify(body)} : undefined), e, ctx);
-    await flush();
-    return r;
-  };
-  const tick = async (at: number) => { vi.setSystemTime(at); await worker.scheduled(null, e, ctx); await flush(); };
-  const play = async (c: string, name: string, won: boolean, turns: number, alive: number, day = TODAY, extra: object = {}) => {
-    await call('/api/name', {id: id(c), name});
-    await call('/api/start', {id: id(c), name, day});
-    return call('/api/finish', {id: id(c), day, won, turns, alive, ...extra});
-  };
-  const text = (starts: string) => sent.filter(m => m.url === HOOK).map(m => m.content as string).filter(t => t.startsWith(starts)); // the feed
-  const results = () => sent.filter(m => m.url === RESULTS).map(m => m.content as string); // the results channel
-  return {db, sent, call, tick, play, text, results, fetchMock};
-}
-
 describe('Worker hooks', () => {
   beforeEach(() => { vi.useFakeTimers({toFake: ['Date']}); vi.setSystemTime(ROLLOVER + 12 * 3600e3); });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
@@ -119,19 +76,19 @@ describe('Worker hooks', () => {
     await t.play('a', 'ASH', true, 10, 3, TODAY, {sq: '32100'});
     await t.play('b', 'MISTY', false, 7, 0, TODAY, {sq: '00000'});
     expect(t.results()).toEqual([
-      'Oakle #5 — **ASH** beat Oak in 10 turns\n🟩🟨🟥⬛⬛\n<https://oakle.test>',
-      'Oakle #5 — **MISTY** lost to Oak in 7 turns\n⬛⬛⬛⬛⬛\n<https://oakle.test>',
+      box('Oakle #5 — ASH beat Oak in 10 turns\n🟩🟨🟥⬛⬛'),
+      box('Oakle #5 — MISTY lost to Oak in 7 turns\n⬛⬛⬛⬛⬛'),
     ]);
   });
-  it('archive days say so, and squares that are missing, junk or do not add up fall back to the survivor count', async () => {
+  it('a past day just names its number, and squares that are missing, junk or do not add up fall back to the survivor count', async () => {
     const t = await setup();
     await t.play('a', 'ASH', true, 9, 2, TODAY - 1, {sq: '33333'}); // claims 5 survivors, the result says 2
     await t.play('b', 'MISTY', true, 11, 1, TODAY - 1); // no squares sent
     await t.play('c', 'BROCK', true, 12, 4, TODAY - 1, {sq: {not: 'a string'}});
     expect(t.results()).toEqual([
-      `Oakle #${TODAY - 1} (archive) — **ASH** beat Oak in 9 turns\n🟩🟩⬛⬛⬛\n<https://oakle.test>`,
-      `Oakle #${TODAY - 1} (archive) — **MISTY** beat Oak in 11 turns\n🟩⬛⬛⬛⬛\n<https://oakle.test>`,
-      `Oakle #${TODAY - 1} (archive) — **BROCK** beat Oak in 12 turns\n🟩🟩🟩🟩⬛\n<https://oakle.test>`,
+      box(`Oakle #${TODAY - 1} — ASH beat Oak in 9 turns\n🟩🟩⬛⬛⬛`),
+      box(`Oakle #${TODAY - 1} — MISTY beat Oak in 11 turns\n🟩⬛⬛⬛⬛`),
+      box(`Oakle #${TODAY - 1} — BROCK beat Oak in 12 turns\n🟩🟩🟩🟩⬛`),
     ]);
   });
   it('no results post without DISCORD_RESULTS_WEBHOOK, and the feed is unaffected', async () => {
@@ -186,7 +143,7 @@ describe('Worker hooks', () => {
   it('a stored name that predates the filter is escaped in every message', async () => {
     const t = await setup();
     await t.call(`/api/me?id=${id('a')}`); // creates the schema
-    const nasty = '**@everyone** http://evil.example/x [y](z)';
+    const nasty = '**@everyone** ``` http://evil.example/x\n[y](z)';
     t.db.sql.prepare('INSERT INTO players (id, name, created_at) VALUES (?, ?, 0)').run(id('a'), nasty); // bypasses the 7-character A-Z filter
     await t.call('/api/start', {id: id('a'), name: 'X', day: TODAY});
     await t.call('/api/finish', {id: id('a'), day: TODAY, won: true, turns: 10, alive: 3});
@@ -196,8 +153,8 @@ describe('Worker hooks', () => {
     expect(msg).not.toMatch(/https?:\/\//);
     expect(t.sent[0].allowed_mentions).toEqual({parse: []});
     const [card] = t.results();
-    expect(card).toContain('**\\*\\*@' + String.fromCharCode(0x200b) + 'everyone');
-    expect(card).not.toContain('@everyone');
-    expect(card).not.toMatch(/https?:\/\/evil/);
+    expect(card.split('\n')).toHaveLength(4); // fence, title, squares, fence: the name cannot add lines
+    expect(card.split('```')).toHaveLength(3); // and cannot close the block early
+    expect(card).toContain("Oakle #5 — **@everyone** ''' http://evil.ex beat Oak in 10 turns"); // backticks swapped for quotes, 32 characters at most
   });
 });

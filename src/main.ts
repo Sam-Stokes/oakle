@@ -414,6 +414,40 @@ function stats() {
   };
 }
 
+// ---- Discord link: opt-in. The server keeps only the Discord id and display name; this is what the page shows of it.
+let discord: { name: string; member: boolean } | null = null;
+let dcMsg = "";
+const DC_MSG: Record<string, string> = {
+  linked: "Discord linked.",
+  taken: "That Discord account is already linked to another trainer.",
+  none: "No trainer is linked to that Discord account yet. Link it from your record first.",
+  error: "Discord sign-in did not work. Try again.",
+};
+/** Asks the server for the Discord authorize link and goes there. Returns a message only when it could not. */
+async function dcStart(mode: "link" | "signin"): Promise<string> {
+  if (TEST) return "Not available in test mode.";
+  try {
+    const r = await api("discord/start", { mode, id: save.id });
+    if (r.status === 200 && r.data.url) {
+      location.href = r.data.url;
+      return "";
+    }
+    return r.status === 503
+      ? "Discord sign-in is not set up yet."
+      : r.status === 400
+        ? "Pick a name first."
+        : "Could not start. Try again.";
+  } catch {
+    return "Offline. Try again.";
+  }
+}
+const discordRow = () =>
+  `<p class="muted" id="dc">${
+    discord
+      ? `<span class="dc-on">${DISCORD_ICON}Discord: <b>${esc(discord.name)}</b></span> <button class="linkbtn" id="dcunlink">Unlink</button>${discord.member ? "" : ` <a href="${DISCORD}" target="_blank" rel="noopener">Join the server</a> <button class="linkbtn" id="dclink">Refresh</button>`}`
+      : `Restore your trainer on any device. <button class="linkbtn" id="dclink">${DISCORD_ICON}Link Discord</button>`
+  }</p>${dcMsg ? `<p class="muted" id="dcmsg">${esc(dcMsg)}</p>` : ""}`;
+
 function renderRecord() {
   const run = save.runs[day],
     s = stats(),
@@ -422,7 +456,6 @@ function renderRecord() {
     run?.done && !run.voided
       ? shareText({
           day,
-          late: !!run.late,
           won: !!run.won,
           turns: run.turns ?? 0,
           alive: run.alive ?? 0,
@@ -432,6 +465,7 @@ function renderRecord() {
       : "";
   $("#record").innerHTML = `<h2>Your record</h2>
     <p class="who" id="who">Playing as <b>${esc(save.name || "...")}</b> <button class="linkbtn" id="rename">Change name</button></p>
+    ${discordRow()}
     <div class="stats"><div><b>${s.played}</b><span>played</span></div><div><b>${s.wins}</b><span>won</span></div><div><b>${s.pct}%</b><span>win rate</span></div><div><b>${s.streak}</b><span>streak</span></div></div>
     ${done && !run.forfeit ? `<p class="today">${run.won ? "You beat Prof. Oak" : "Prof. Oak won"} in ${run.turns} turns${run.alive != null ? `, ${run.alive} of 5 left` : ""}</p><button class="btn" id="share">Share result</button>` : ""}
     <p class="muted" id="next"></p>
@@ -487,6 +521,20 @@ function renderRecord() {
       if (e.key === "Enter") save_();
       if (e.key === "Escape") renderRecord();
     });
+  });
+  document.getElementById("dclink")?.addEventListener("click", async () => {
+    dcMsg = await dcStart("link");
+    if (dcMsg) renderRecord();
+  });
+  document.getElementById("dcunlink")?.addEventListener("click", async () => {
+    try {
+      await api("discord/unlink", { id: save.id });
+      discord = null;
+      dcMsg = "Discord unlinked.";
+    } catch {
+      dcMsg = "Offline. Try again.";
+    }
+    renderRecord();
   });
   updateCountdown();
 }
@@ -611,6 +659,16 @@ async function main() {
       ? asked
       : current;
   archive = day < current;
+  // back from Discord: a sign-in code that adopts the linked trainer, or the outcome of linking
+  const loginCode = Q.get("code"),
+    dcResult = Q.get("discord");
+  if (loginCode || dcResult)
+    history.replaceState(null, "", location.pathname + (TEST ? "?test" : ""));
+  if (loginCode && !TEST) {
+    if (await claim(loginCode)) return;
+    dcMsg = "That sign-in expired. Try again.";
+  }
+  if (dcResult) dcMsg = DC_MSG[dcResult] ?? "";
   if (!TEST)
     document.addEventListener(
       "visibilitychange",
@@ -654,6 +712,7 @@ async function main() {
         voided: false,
         forfeit: false,
       };
+    discord = me.discord ?? null;
     persist();
   } catch (e) {
     if ((e as Error)?.message === "signin") {
@@ -696,7 +755,7 @@ function askName() {
   return new Promise<void>((res) => {
     const nameForm = () => {
       overlay(
-        `<p class="big">OAKLE #${day}</p><p>PICK A NAME</p><input id="n" maxlength="7" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Your name"><p class="dim" id="nerr">1 TO 7 LETTERS OR NUMBERS.<br>SHOWN ON THE LEADERBOARD.</p><button class="ov-btn" id="ok">OK</button><button class="ov-link" id="have">I ALREADY PLAY ON ANOTHER DEVICE</button>`,
+        `<p class="big">OAKLE #${day}</p><p>PICK A NAME</p><input id="n" maxlength="7" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Your name"><p class="dim" id="nerr">1 TO 7 LETTERS OR NUMBERS.<br>SHOWN ON THE LEADERBOARD.</p><button class="ov-btn" id="ok">OK</button><button class="ov-link" id="have">I ALREADY PLAY ON ANOTHER DEVICE</button><button class="ov-link" id="dcin">${DISCORD_ICON}SIGN IN WITH DISCORD</button>`,
       );
       $("#n").addEventListener("keydown", (e) => {
         if ((e as KeyboardEvent).key === "Enter") $("#ok").click();
@@ -723,6 +782,10 @@ function askName() {
         res();
       };
       $("#have").onclick = codeForm;
+      $("#dcin").onclick = async () => {
+        const m = await dcStart("signin");
+        if (m) $("#nerr").textContent = m.toUpperCase();
+      };
     };
     const codeForm = () => {
       overlay(
@@ -756,6 +819,7 @@ function renderLink(msg = "") {
   const wasOpen = el.open || !!live || !!msg;
   el.innerHTML = `<summary>Play on another device</summary>
     <p class="muted">Take your record to your phone or laptop. No sign-up.</p>
+    <button class="btn ghost" id="dcin">Sign in with Discord</button><p class="muted">Replaces the trainer on this device with the one linked to your Discord.</p>
     ${live ? `<div class="code" aria-live="polite">${pairCode!.code}</div><p class="muted">Enter this on the other device within 10 minutes. It works once.</p>` : ""}
     ${msg ? `<p class="muted">${esc(msg)}</p>` : ""}
     <button class="btn" id="getcode">${live ? "New code" : "Get a code"}</button>
@@ -776,6 +840,10 @@ function renderLink(msg = "") {
       return renderLink("Offline. Try again.");
     }
     renderLink();
+  };
+  $("#dcin").onclick = async () => {
+    const m = await dcStart("signin");
+    if (m) renderLink(m);
   };
   $("#usecode").onclick = async () => {
     const ok = await claim($<HTMLInputElement>("#cardcode").value);

@@ -5,11 +5,11 @@ import {decodeLog} from '../src/rom';
 import {cleanCode, cleanName, isBlocked, makeCode, streaks} from './stats';
 import {verify} from './verify';
 import {kickAudit} from './kick';
-import {md, notify} from './discord';
+import {chip, md, mention, notify, plain} from './discord';
 import {rowFrom, shareText} from '../src/share';
 
-const json = (o: unknown, status = 200) => new Response(JSON.stringify(o), {status, headers: {
-  'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'strict-transport-security': 'max-age=31536000',
+const json = (o: unknown, status = 200, extra: Record<string, string> = {}) => new Response(JSON.stringify(o), {status, headers: {
+  'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'strict-transport-security': 'max-age=31536000', ...extra,
 }});
 const ID = /^[0-9a-f-]{16,64}$/;
 const TOP = 20;
@@ -27,13 +27,18 @@ const TABLES = [
   `CREATE INDEX IF NOT EXISTS runs_day ON runs (day, won, turns, finished_at)`,
   `CREATE TABLE IF NOT EXISTS pairs (code TEXT PRIMARY KEY, player_id TEXT NOT NULL, expires_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS throttle (k TEXT PRIMARY KEY, w INTEGER NOT NULL, n INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS oauth_states (state TEXT PRIMARY KEY, player_id TEXT, mode TEXT NOT NULL, expires_at INTEGER NOT NULL)`,
 ];
 const COLUMNS: [string, string][] = [['late', 'late INTEGER NOT NULL DEFAULT 0'], ['alive', 'alive INTEGER'], ['log', 'log TEXT'], ['verified', 'verified INTEGER']]; // added after launch
+const PLAYER_COLUMNS: [string, string][] = [['discord_id', 'discord_id TEXT'], ['discord_name', 'discord_name TEXT'], ['discord_member', 'discord_member INTEGER']]; // Discord link, opt-in
 let schema: Promise<void> | null = null;
 const ensureSchema = (db: any) => (schema ??= (async () => {
   await db.batch(TABLES.map(s => db.prepare(s)));
   const have = new Set((await db.prepare(`PRAGMA table_info(runs)`).all()).results.map((c: any) => c.name));
   for (const [name, ddl] of COLUMNS) if (!have.has(name)) await db.prepare(`ALTER TABLE runs ADD COLUMN ${ddl}`).run();
+  const haveP = new Set((await db.prepare(`PRAGMA table_info(players)`).all()).results.map((c: any) => c.name));
+  for (const [name, ddl] of PLAYER_COLUMNS) if (!haveP.has(name)) await db.prepare(`ALTER TABLE players ADD COLUMN ${ddl}`).run();
+  await db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS players_discord ON players (discord_id) WHERE discord_id IS NOT NULL`).run();
 })().catch((e) => { schema = null; throw e; }));
 
 // Fixed-window counter per key (per IP and action): true when the caller is over the limit for this minute.
@@ -67,27 +72,70 @@ const boardRows = async (db: any, day: number) => {
 };
 declare const HTMLRewriter: any; // Workers runtime global (no @cloudflare/workers-types in this project)
 
-type Env = {DB: any; ASSETS: {fetch: typeof fetch}; FLOOD?: {limit(o: {key: string}): Promise<{success: boolean}>}; VERIFY?: string; GITHUB_TOKEN?: string; GITHUB_REPO?: string; DISCORD_WEBHOOK?: string; DISCORD_RESULTS_WEBHOOK?: string};
+type Env = {DB: any; ASSETS: {fetch: typeof fetch}; FLOOD?: {limit(o: {key: string}): Promise<{success: boolean}>}; VERIFY?: string; GITHUB_TOKEN?: string; GITHUB_REPO?: string; DISCORD_WEBHOOK?: string; DISCORD_RESULTS_WEBHOOK?: string; DISCORD_CLIENT_ID?: string; DISCORD_CLIENT_SECRET?: string; DISCORD_GUILD_ID?: string};
 type Ctx = {waitUntil(p: Promise<unknown>): void};
 const WHEN = (day: number, current: number) => day === current ? 'today' : `on Oakle #${day}`;
 
 /** Discord note for a win: where it lands on that day's board. Called after the run is saved. */
 async function announceWin(db: any, env: Env, id: string, day: number, v: {turns: number; alive: number}, current: number) {
-  const r = await db.prepare(`SELECT (SELECT name FROM players WHERE id = ?) AS name, 1 + COUNT(*) AS rank FROM runs
-    WHERE day = ? AND won = 1 AND player_id != ? AND (turns < ? OR (turns = ? AND alive >= ?))`).bind(id, day, id, v.turns, v.turns, v.alive).first();
+  const r = await db.prepare(`SELECT p.name, p.discord_id, p.discord_member, (SELECT 1 + COUNT(*) FROM runs
+    WHERE day = ? AND won = 1 AND player_id != ? AND (turns < ? OR (turns = ? AND alive >= ?))) AS rank FROM players p WHERE p.id = ?`)
+    .bind(day, id, v.turns, v.turns, v.alive, id).first();
   if (!r?.name) return;
-  const name = md(isBlocked(r.name) ? '???' : r.name);
+  const who = `**${md(isBlocked(r.name) ? '???' : r.name)}**${chip(r.discord_id, r.discord_member)}`;
   await notify(env, r.rank === 1
-    ? `🥇 **${name}** takes #1 ${WHEN(day, current)}: ${v.turns} turns, ${v.alive} left`
-    : `**${name}** beat Oak in ${v.turns} turns, ${v.alive} left. #${r.rank} ${WHEN(day, current)}`);
+    ? `🥇 ${who} takes #1 ${WHEN(day, current)}: ${v.turns} turns, ${v.alive} left`
+    : `${who} beat Oak in ${v.turns} turns, ${v.alive} left. #${r.rank} ${WHEN(day, current)}`);
 }
 
-/** The player's share card, for the results channel: same layout as the page's Share button, with their name. */
-async function postResult(db: any, env: Env, id: string, day: number, v: {won: boolean; turns: number; alive: number}, squares: unknown, current: number, origin: string) {
-  const r = await db.prepare(`SELECT name FROM players WHERE id = ?`).bind(id).first();
+/** The player's share card for the results channel: the page's Share text with their name, in a code block, no link. */
+async function postResult(db: any, env: Env, id: string, day: number, v: {won: boolean; turns: number; alive: number}, squares: unknown) {
+  const r = await db.prepare(`SELECT name, discord_id, discord_member FROM players WHERE id = ?`).bind(id).first();
   if (!r?.name) return;
-  const who = `**${md(isBlocked(r.name) ? '???' : r.name)}**`;
-  await notify({DISCORD_WEBHOOK: env.DISCORD_RESULTS_WEBHOOK}, shareText({day, late: day < current, won: v.won, turns: v.turns, alive: v.alive, who, row: rowFrom(squares, v.alive), link: `<${origin}>`}));
+  const card = shareText({day, won: v.won, turns: v.turns, alive: v.alive, who: plain(isBlocked(r.name) ? '???' : r.name), row: rowFrom(squares, v.alive), link: ''});
+  const who = mention(r.discord_id, r.discord_member); // a mention does not render inside a code block, so it goes on a line above
+  await notify({DISCORD_WEBHOOK: env.DISCORD_RESULTS_WEBHOOK}, (who ? who + '\n' : '') + '```\n' + card + '\n```');
+}
+
+const STATE_COOKIE = 'oakle_oauth';
+const clearCookie = `${STATE_COOKIE}=; Max-Age=0; Path=/api/discord; HttpOnly; Secure; SameSite=Lax`;
+const cookieOf = (req: Request, name: string) => (req.headers.get('cookie') ?? '').split(/;\s*/).map(c => c.split('=')).find(([k]) => k === name)?.[1];
+
+/** Discord sends the browser back here. Only the Discord user id, display name and "is in the server" are kept; the token is dropped. */
+async function discordCallback(req: Request, url: URL, env: Env, db: any, now: number, ip: string) {
+  const back = (q: string) => new Response(null, {status: 302, headers: {location: `${url.origin}/?${q}`, 'cache-control': 'no-store', 'set-cookie': clearCookie}});
+  try {
+    const state = url.searchParams.get('state') ?? '', code = url.searchParams.get('code') ?? '';
+    if (!env.DISCORD_CLIENT_ID || !env.DISCORD_CLIENT_SECRET || !/^[0-9a-f]{48}$/.test(state) || !code || cookieOf(req, STATE_COOKIE) !== state) return back('discord=error');
+    if (await limited(db, `discord:${ip}`, 20)) return back('discord=error');
+    const row = await db.prepare(`DELETE FROM oauth_states WHERE state = ? AND expires_at > ? RETURNING player_id, mode`).bind(state, now).first(); // single use
+    if (!row) return back('discord=error');
+    const tok: any = await fetch('https://discord.com/api/v10/oauth2/token', {method: 'POST', headers: {'content-type': 'application/x-www-form-urlencoded'},
+      body: new URLSearchParams({client_id: env.DISCORD_CLIENT_ID, client_secret: env.DISCORD_CLIENT_SECRET, grant_type: 'authorization_code', code, redirect_uri: `${url.origin}/api/discord/callback`})}).then(r => r.json());
+    if (!tok?.access_token) return back('discord=error');
+    const auth = {authorization: `Bearer ${tok.access_token}`};
+    const [me, guilds]: any[] = await Promise.all([fetch('https://discord.com/api/v10/users/@me', {headers: auth}).then(r => r.json()), fetch('https://discord.com/api/v10/users/@me/guilds', {headers: auth}).then(r => r.json())]);
+    if (!/^[0-9]{15,25}$/.test(String(me?.id))) return back('discord=error');
+    const name = String(me.global_name || me.username || '').slice(0, 40), member = Array.isArray(guilds) && !!env.DISCORD_GUILD_ID && guilds.some((g: any) => g.id === env.DISCORD_GUILD_ID) ? 1 : 0;
+    const owner = await db.prepare(`SELECT id FROM players WHERE discord_id = ?`).bind(me.id).first();
+
+    if (row.mode === 'link') {
+      if (owner && owner.id !== row.player_id) return back('discord=taken');
+      await db.prepare(`UPDATE players SET discord_id = ?, discord_name = ?, discord_member = ? WHERE id = ?`).bind(me.id, name, member, row.player_id).run();
+      return back('discord=linked');
+    }
+    if (!owner) return back('discord=none');
+    await db.prepare(`UPDATE players SET discord_name = ?, discord_member = ? WHERE id = ?`).bind(name, member, owner.id).run();
+    await db.prepare(`DELETE FROM pairs WHERE player_id = ? OR expires_at < ?`).bind(owner.id, now).run();
+    for (let i = 0; i < 5; i++) { // the existing one-time code is how a device adopts a trainer
+      const pair = makeCode(crypto.getRandomValues(new Uint8Array(6)));
+      if ((await db.prepare(`INSERT OR IGNORE INTO pairs (code, player_id, expires_at) VALUES (?, ?, ?)`).bind(pair, owner.id, now + PAIR_TTL_MS).run()).meta.changes) return back(`code=${pair}`);
+    }
+    return back('discord=error');
+  } catch (e) {
+    console.error('discord sign-in error'); // not the error object: it can carry the code or the token
+    return back('discord=error');
+  }
 }
 
 export default {
@@ -98,7 +146,10 @@ export default {
     ctx.waitUntil((async () => {
       await ensureSchema(env.DB);
       const [board, count] = await boardRows(env.DB, n - 1);
-      const top = board.results.slice(0, 3).map((r: any, i: number) => `${i + 1}. ${md(isBlocked(r.name) ? '???' : r.name)}, ${r.turns} turns`);
+      const winners = board.results.slice(0, 3);
+      const links = new Map<string, any>();
+      if (winners.length) for (const l of (await env.DB.prepare(`SELECT id, discord_id, discord_member FROM players WHERE id IN (${winners.map(() => '?').join(',')})`).bind(...winners.map((r: any) => r.id)).all()).results) links.set(l.id, l);
+      const top = winners.map((r: any, i: number) => `${i + 1}. ${md(isBlocked(r.name) ? '???' : r.name)}${chip(links.get(r.id)?.discord_id, links.get(r.id)?.discord_member)}, ${r.turns} turns`);
       await notify(env, `**Oakle #${n - 1} recap:** ${count.won} of ${count.played} beat Oak.${top.length ? '\n' + top.join('\n') : ''}`);
     })().catch((e) => console.error('recap error', e)));
   },
@@ -141,7 +192,8 @@ export default {
         const id = url.searchParams.get('id') ?? '';
         if (!ID.test(id)) return json({runs: []});
         const r = await db.prepare(`SELECT day, won, turns, alive, late FROM runs WHERE player_id = ? AND finished_at IS NOT NULL ORDER BY day`).bind(id).all();
-        return json({runs: r.results});
+        const p = await db.prepare(`SELECT discord_id, discord_name, discord_member FROM players WHERE id = ?`).bind(id).first();
+        return json({runs: r.results, discord: p?.discord_id ? {name: p.discord_name, member: !!p.discord_member} : null});
       }
 
       // ---- leaderboards: the chosen day, all time, streaks, plus where the asking player stands
@@ -167,6 +219,8 @@ export default {
         });
       }
 
+      if (url.pathname === '/api/discord/callback' && req.method === 'GET') return discordCallback(req, url, env, db, Date.now(), ip);
+
       if (req.method !== 'POST') return json({error: 'not found'}, 404);
       const maxBody = url.pathname === '/api/finish' ? MAX_FINISH_BODY : MAX_BODY;
       if (Number(req.headers.get('content-length')) > maxBody) return json({error: 'too large'}, 413);
@@ -187,7 +241,24 @@ export default {
         await db.prepare(`DELETE FROM pairs WHERE code = ?`).bind(code).run(); // single use
         return json({id: row.id, name: row.name});
       }
+      if (url.pathname === '/api/discord/start') {
+        if (!env.DISCORD_CLIENT_ID || !env.DISCORD_CLIENT_SECRET) return json({error: 'not configured'}, 503);
+        if (await limited(db, `discord:${ip}`, 20)) return json({error: 'slow down'}, 429);
+        const mode = body.mode === 'link' ? 'link' : 'signin';
+        if (mode === 'link' && !(ID.test(body.id) && await db.prepare(`SELECT 1 AS k FROM players WHERE id = ?`).bind(body.id).first())) return json({error: 'pick a name first'}, 400);
+        await db.prepare(`DELETE FROM oauth_states WHERE expires_at < ?`).bind(now).run();
+        const state = [...crypto.getRandomValues(new Uint8Array(24))].map(b => b.toString(16).padStart(2, '0')).join('');
+        await db.prepare(`INSERT INTO oauth_states (state, player_id, mode, expires_at) VALUES (?, ?, ?, ?)`).bind(state, mode === 'link' ? body.id : null, mode, now + PAIR_TTL_MS).run();
+        const q = new URLSearchParams({client_id: env.DISCORD_CLIENT_ID, redirect_uri: `${url.origin}/api/discord/callback`, response_type: 'code', scope: 'identify guilds', state, prompt: 'none'});
+        // the cookie ties the callback to the browser that started it (blocks someone else's link being completed by a victim)
+        return json({url: `https://discord.com/oauth2/authorize?${q}`}, 200, {'set-cookie': `${STATE_COOKIE}=${state}; Max-Age=600; Path=/api/discord; HttpOnly; Secure; SameSite=Lax`});
+      }
       if (!ID.test(body.id)) return json({error: 'bad id'}, 400);
+
+      if (url.pathname === '/api/discord/unlink') {
+        await db.prepare(`UPDATE players SET discord_id = NULL, discord_name = NULL, discord_member = NULL WHERE id = ?`).bind(body.id).run();
+        return json({ok: true});
+      }
 
       // ---- names are unique (case-insensitive); the player picks one and may change it later
       if (url.pathname === '/api/name') {
@@ -275,7 +346,7 @@ export default {
           .bind(now, verdict.won ? 1 : 0, verdict.turns, verdict.alive, evidence, verified, body.id, day).run();
         boards.clear();
         if (verdict.won && env.DISCORD_WEBHOOK) ctx.waitUntil(announceWin(db, env, body.id, day, verdict, current).catch((e) => console.error('discord error', e)));
-        if (env.DISCORD_RESULTS_WEBHOOK) ctx.waitUntil(postResult(db, env, body.id, day, verdict, body.sq, current, url.origin).catch((e) => console.error('discord error', e)));
+        if (env.DISCORD_RESULTS_WEBHOOK) ctx.waitUntil(postResult(db, env, body.id, day, verdict, body.sq).catch((e) => console.error('discord error', e)));
         if (verified === 0) ctx.waitUntil(kickAudit(env).catch((e) => console.error('audit dispatch error', e))); // audit this win now
         return json(verdict);
       }

@@ -236,3 +236,7 @@ a.card.discord .dc { width: 30px; height: 30px; color: #5865f2; }
 @media (hover: hover) { a.card.discord:hover { background: var(--soft); } }
 .foot .dc { vertical-align: -0.2em; margin-right: 5px; }
 .overlay .ov-link .dc { width: 12px; height: 12px; margin-right: 6px; vertical-align: -2px; }
+
+/* ---- Discord link row in the record card */
+.linkbtn .dc, .dc-on .dc { vertical-align: -0.2em; margin-right: 5px; }
+.dc-on .dc { color: #5865f2; }

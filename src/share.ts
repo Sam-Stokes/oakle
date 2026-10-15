@@ -26,10 +26,10 @@ export const rowFrom = (b: unknown, alive: number) =>
     : '🟩'.repeat(alive) + '⬛'.repeat(Math.max(0, 5 - alive));
 
 // who: someone else's card (the Discord post names the player); row: squares already worked out (from rowFrom)
-export function shareText(o: {day: number; late: boolean; won: boolean; turns: number; alive: number; party?: Party; link: string; who?: string; row?: string}) {
+export function shareText(o: {day: number; won: boolean; turns: number; alive: number; party?: Party; link: string; who?: string; row?: string}) {
   const squares = o.row ?? (o.party?.length ? o.party.map(square).join('') : '🟩'.repeat(o.alive) + '⬛'.repeat(Math.max(0, 5 - o.alive)));
   const who = o.who ?? 'I';
   const turns = `${o.turns} turn${o.turns === 1 ? '' : 's'}`;
-  const title = `Oakle #${o.day}${o.late ? ' (archive)' : ''} — ${o.won ? `${who} beat Oak in ${turns}` : `${who} lost to Oak in ${turns}`}`;
-  return `${title}\n${squares}\n${o.link}`;
+  const title = `Oakle #${o.day} — ${o.won ? `${who} beat Oak in ${turns}` : `${who} lost to Oak in ${turns}`}`;
+  return `${title}\n${squares}${o.link ? `\n${o.link}` : ''}`; // link: '' leaves the line out (the Discord card)
 }

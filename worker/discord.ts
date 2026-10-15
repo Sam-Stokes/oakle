@@ -17,6 +17,13 @@ export async function notify(env: {DISCORD_WEBHOOK?: string}, content: string, f
   }
 }
 
+/** How a linked player who is in the server appears next to their name: a mention chip (it renders, and never pings). */
+export const mention = (id: unknown, member: unknown) => (member && /^[0-9]{15,25}$/.test(String(id)) ? `<@${id}>` : '');
+export const chip = (id: unknown, member: unknown) => { const m = mention(id, member); return m ? ` (${m})` : ''; };
+
+/** A player's name for use INSIDE a code block: nothing in there renders, so no escaping, just no way to close the block or add lines. */
+export const plain = (s: unknown) => String(s ?? '').replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, ' ').replace(/`/g, "'").replace(/\s+/g, ' ').trim().slice(0, 32);
+
 /** Player-controlled text made inert inside a message: no markdown, links, mentions or emoji codes. Stored names are untouched. */
 const ZWSP = String.fromCharCode(0x200b);
 export const md = (s: unknown) => String(s ?? '')
