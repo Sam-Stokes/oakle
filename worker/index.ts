@@ -173,6 +173,9 @@ export default {
           const c = el.getAttribute('content');
           if (c && c.startsWith('/')) el.setAttribute('content', url.origin + c);
         },
+      }).on('head', {
+        // Added here, not in index.html (Vite would treat href="/" as an asset). ?day=N archive URLs fold into /.
+        element(el: any) { el.append(`<link rel="canonical" href="${url.origin}/">`, {html: true}); },
       }).transform(page);
     }
     // A path that Cloudflare Access can protect on its own: visiting it forces the login, then lands on the game.

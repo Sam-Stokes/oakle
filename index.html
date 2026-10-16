@@ -6,11 +6,10 @@
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" media="(prefers-color-scheme: light)" content="#d6d9df">
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#13151a">
-  <title>Oakle</title>
-  <meta name="robots" content="noindex, nofollow">
+  <title>Oakle: Daily Pokémon Yellow Battle vs Professor Oak</title>
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-  <meta name="description" content="Beat Professor Oak's unused Pokemon team with a brand new random team every day. One try a day.">
+  <meta name="description" content="A daily Pokémon game like Wordle: everyone gets the same random team and one try to beat Professor Oak in the real Pokémon Yellow, right in your browser.">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Oakle">
   <meta property="og:title" content="Oakle: beat Professor Oak">
@@ -28,7 +27,18 @@
   <link rel="preload" href="/fonts/outfit.woff2" as="font" type="font/woff2" crossorigin>
 </head>
 <body>
-  <main id="app"></main>
+  <main id="app">
+    <!-- Crawlable text; buildShell() in src/main.ts replaces it on boot. -->
+    <h1>Oakle: the daily Pokémon Yellow challenge</h1>
+    <p>Every day a new random team of five Pokémon lands in your hands, the same team for every player, and you get one try to beat Professor Oak's unused Gen 1 team in the real Pokémon Yellow, running in your browser.</p>
+    <ul>
+      <li>Talk to Prof. Oak when you are ready. Before that you can reorder your team with START, then POKEMON.</li>
+      <li>Everyone gets the same team and the same dice each day. One try per day, no rematches.</li>
+      <li>Fewest turns wins the day. Missed a day? Play it from the archive: it still counts towards your wins.</li>
+      <li>Only the first try counts. After that you can play the day again for practice.</li>
+      <li>Some days are brutal on purpose.</li>
+    </ul>
+  </main>
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>
