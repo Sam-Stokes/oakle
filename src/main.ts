@@ -133,7 +133,7 @@ const idb = () =>
     r.onsuccess = () => res(r.result);
     r.onerror = () => rej(r.error);
   });
-type Saved = { state: Uint8Array; log: number[]; name: string; rom: string }; // a save state with the input log and name that produced it
+type Saved = { state: Uint8Array; log: number[]; name: string; rom: string; cfg?: string }; // a save state with the input log, name and day data (dayId) that produced it
 const idbGet = async (k: string) => {
   const db = await idb();
   return new Promise<Saved | undefined>((res) => {
@@ -981,9 +981,11 @@ async function play(resume: boolean, practice = false) {
   emu.setMuted(muted);
   if (resume) {
     const saved = await idbGet(stateKey(day));
-    if (saved?.rom && saved.rom !== emu.romId) {
-      // The game was updated since this battle began, and a save state only works on the ROM it came from. Not the
-      // player's fault, so the battle simply starts again on the new ROM.
+    // Saves from before the 2026-10-19 party fix (no cfg) hold a scrambled team on days with a short-moveset mon.
+    const wrongTeam = today.party.some((m) => m.length < 5) && saved && saved.cfg !== (await dayId(today).catch(() => ""));
+    if ((saved?.rom && saved.rom !== emu.romId) || wrongTeam) {
+      // The game was updated since this battle began, and a save state only works on the ROM and day data it came from.
+      // Not the player's fault, so the battle simply starts again on the new one.
       await emu.warm();
     } else {
       if (!saved?.log || !emu.loadState(saved.state, saved.log)) {
@@ -1010,6 +1012,7 @@ async function play(resume: boolean, practice = false) {
   overlay(null);
   $("#console").dataset.on = "true";
 
+  const cfg = await dayId(today).catch(() => "");
   const saveNow = () =>
     emu &&
     idbSet(stateKey(day), {
@@ -1017,6 +1020,7 @@ async function play(resume: boolean, practice = false) {
       log: emu.input.log.slice(),
       name: emu.romName,
       rom: emu.romId,
+      cfg,
     });
   const saver = window.setInterval(() => {
     if (!practice) saveNow();
