@@ -14,6 +14,9 @@ const encodeName = (n: string) => {
   return out;
 };
 
+/** The ROM reads 5 fixed 5-byte entries (species, move1..move4): a mon with fewer than 4 moves is padded with 0 (no move). */
+const partyBytes = (party: number[][]) => party.flatMap(m => [...m, 0, 0, 0, 0].slice(0, 5));
+
 /** A copy of the ROM with the day's trainer, dice, party and the player's name written into its config block. */
 export function patchRom(rom: Uint8Array, at: number, d: Day, name: string) {
   const r = rom.slice();
@@ -22,7 +25,7 @@ export function patchRom(rom: Uint8Array, at: number, d: Day, name: string) {
   r[at + CFG.day] = d.day & 255; r[at + CFG.day + 1] = d.day >> 8;
   r.set(d.rng, at + CFG.rng);
   r.set(encodeName(name), at + CFG.name);
-  r.set(d.party.flatMap(m => [...m, 0, 0, 0, 0].slice(0, 5)), at + CFG.party); // fixed 5-byte entries; a mon with <4 moves is padded with 0 (no move)
+  r.set(partyBytes(d.party), at + CFG.party);
   return r;
 }
 
@@ -111,7 +114,7 @@ export async function romId(rom: Uint8Array): Promise<string> {
 }
 
 /** Fingerprint of one day's data (trainer, dice, party): a log is only evidence against the data it was played with. */
-export const dayId = (d: {trainer: number; rng: number[]; party: number[][]}) => romId(new TextEncoder().encode(JSON.stringify([d.trainer, d.rng, d.party])));
+export const dayId = (d: {trainer: number; rng: number[]; party: number[][]}) => romId(new TextEncoder().encode(JSON.stringify([d.trainer, d.rng, d.party.map(m => partyBytes([m]))])));
 
 // ---- replay
 const TAIL_FRAMES = 18_000; // game time allowed after the last input for the result to appear (5 minutes; real ones take ~1 s)

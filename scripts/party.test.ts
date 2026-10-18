@@ -2,7 +2,7 @@
 // must not shift the mons after it. Runs on the baked days, so a regenerated days file can never reintroduce it.
 import {readdirSync, readFileSync} from 'node:fs';
 import {expect, it} from 'vitest';
-import {patchRom, type Day} from '../src/rom';
+import {dayId, patchRom, romId, type Day} from '../src/rom';
 
 const DIR = new URL('../public/days/', import.meta.url);
 
@@ -18,4 +18,10 @@ it('every day writes each mon at its own 5-byte slot in the ROM config', () => {
     });
   }
   expect(short).toBeGreaterThan(0); // the data really does contain short entries, so this test means something
+});
+
+it('day fingerprints: unchanged for full parties, changed for the days that were played scrambled', async () => {
+  const legacy = (d: Day) => romId(new TextEncoder().encode(JSON.stringify([d.trainer, d.rng, d.party])));
+  for (const f of readdirSync(DIR).slice(0, 2)) for (const d of JSON.parse(readFileSync(new URL(f, DIR), 'utf8')).days as Day[])
+    expect(await dayId(d) === await legacy(d), `day ${d.day}`).toBe(d.party.every(m => m.length === 5));
 });
