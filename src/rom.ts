@@ -22,7 +22,7 @@ export function patchRom(rom: Uint8Array, at: number, d: Day, name: string) {
   r[at + CFG.day] = d.day & 255; r[at + CFG.day + 1] = d.day >> 8;
   r.set(d.rng, at + CFG.rng);
   r.set(encodeName(name), at + CFG.name);
-  r.set(d.party.flat(), at + CFG.party);
+  r.set(d.party.flatMap(m => [...m, 0, 0, 0, 0].slice(0, 5)), at + CFG.party); // fixed 5-byte entries; a mon with <4 moves is padded with 0 (no move)
   return r;
 }
 

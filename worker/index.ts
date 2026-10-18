@@ -6,6 +6,7 @@ import {cleanCode, cleanName, isBlocked, makeCode, streaks} from './stats';
 import {verify} from './verify';
 import {kickAudit} from './kick';
 import {chip, md, mention, notify, plain} from './discord';
+import {post as bluesky} from './bluesky';
 import {rowFrom, shareText} from '../src/share';
 
 const json = (o: unknown, status = 200, extra: Record<string, string> = {}) => new Response(JSON.stringify(o), {status, headers: {
@@ -75,7 +76,7 @@ let siteStats: {at: number; body: any} | null = null;
 const STATS_TTL_MS = 10_000;
 declare const HTMLRewriter: any; // Workers runtime global (no @cloudflare/workers-types in this project)
 
-type Env = {DB: any; ASSETS: {fetch: typeof fetch}; FLOOD?: {limit(o: {key: string}): Promise<{success: boolean}>}; VERIFY?: string; GITHUB_TOKEN?: string; GITHUB_REPO?: string; DISCORD_WEBHOOK?: string; DISCORD_RESULTS_WEBHOOK?: string; DISCORD_CLIENT_ID?: string; DISCORD_CLIENT_SECRET?: string; DISCORD_GUILD_ID?: string};
+type Env = {DB: any; ASSETS: {fetch: typeof fetch}; FLOOD?: {limit(o: {key: string}): Promise<{success: boolean}>}; VERIFY?: string; GITHUB_TOKEN?: string; GITHUB_REPO?: string; DISCORD_WEBHOOK?: string; DISCORD_RESULTS_WEBHOOK?: string; DISCORD_CLIENT_ID?: string; DISCORD_CLIENT_SECRET?: string; DISCORD_GUILD_ID?: string; BSKY_HANDLE?: string; BSKY_APP_PASSWORD?: string};
 type Ctx = {waitUntil(p: Promise<unknown>): void};
 const WHEN = (day: number, current: number) => day === current ? 'today' : `on Oakle #${day}`;
 
@@ -146,10 +147,20 @@ async function discordCallback(req: Request, url: URL, env: Env, db: any, now: n
 }
 
 export default {
-  /** Hourly cron: the moment the day rolls over (Auckland), post the finished day's recap. */
+  /** Hourly cron: the moment the day rolls over (Auckland), post the finished day's recap (Discord) and the new day (Bluesky). */
   async scheduled(_event: unknown, env: Env, ctx: Ctx) {
     const now = Date.now(), n = dayNumber(new Date(now));
-    if (!env.DISCORD_WEBHOOK || n < 2 || dayNumber(new Date(now - 3_600_000)) === n) return;
+    if (n < 2 || dayNumber(new Date(now - 3_600_000)) === n) return;
+    if (env.BSKY_APP_PASSWORD) ctx.waitUntil((async () => {
+      await ensureSchema(env.DB);
+      const [, count] = await boardRows(env.DB, n - 1);
+      const days = await env.ASSETS.fetch(new Request(`https://assets.invalid/days/${Math.floor((n - 1) / 50)}.json`)).then(r => r.json() as Promise<{days: {day: number; team: {species: string}[]}[]}>);
+      const team = days.days.find(d => d.day === n)?.team.map(m => m.species).join(', ');
+      if (!team) return;
+      const yesterday = count.played ? ` ${count.won} of ${count.played} beat him yesterday.` : '';
+      await bluesky(env, `Oakle #${n} is live. Today's team: ${team}. One try to beat Prof. Oak in the real Pokémon Yellow.${yesterday}\noakle.day`, 'oakle.day');
+    })().catch((e) => console.error('bluesky error', e instanceof Error ? e.message : 'unknown')));
+    if (!env.DISCORD_WEBHOOK) return;
     ctx.waitUntil((async () => {
       await ensureSchema(env.DB);
       const [board, count] = await boardRows(env.DB, n - 1);
