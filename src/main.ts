@@ -600,7 +600,7 @@ function renderBoard() {
         num(r.turns, "turns"),
         r.late ? '<span class="late">late</span>' : "",
       ]);
-    you = d.todayRank ? `You are #${d.todayRank} on this day` : "";
+    you = d.todayRank ? `You are #${d.todayRank} ${archive ? `on day ${day}` : "today"}` : "";
   } else if (boardTab === "all") {
     body =
       `<p class="muted">Most wins, then fewest turns on average.</p>` +
@@ -621,7 +621,7 @@ function renderBoard() {
     you = d.you ? `Your streak: ${d.you.current} now, ${d.you.best} best` : "";
   }
   el.innerHTML = `<h2>Leaderboard</h2>
-    <div class="tabs">${tab("day", archive ? "This day" : "Today")}${tab("all", "All time")}${tab("streak", "Streaks")}</div>
+    <div class="tabs">${tab("day", archive ? `Day ${day}` : "Today")}${tab("all", "All time")}${tab("streak", "Streaks")}</div>
     ${body}${you ? `<p class="you">${you}</p>` : ""}`;
   document.getElementById("boardmore")?.addEventListener("click", () => {
     boardAll = true;
