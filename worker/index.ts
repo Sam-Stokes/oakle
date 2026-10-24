@@ -347,8 +347,8 @@ export default {
           boards.clear();
           return json({void: true});
         };
-        // one try, one day: a battle that was not finished before the day it was started on ended does not count
-        if (dayNumber(new Date(r.started_at)) !== current) return voidRun();
+        // A battle paused overnight may be finished later: the one try is the runs row made at start, and the page voids
+        // a battle whose saved state is gone, so clearing site data cannot buy a second attempt.
         // not something the game can produce: no turns is no battle. Where no replay backs the result up, a win also needs
         // 5 knockouts and a survivor and a loss leaves none; with a replay the replay decides, so a genuine result is never
         // voided on a guess.
