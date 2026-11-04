@@ -3,29 +3,36 @@
 // few minutes, or by hand: CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ACCOUNT_ID=... D1_DATABASE_ID=... npx tsx scripts/audit.ts
 import {createRequire} from 'node:module';
 import {pathToFileURL} from 'node:url';
+import {GAME_IDS, GAMES, type Game} from '../src/games';
 import {dayId, decodeLog, patchRom, replay, romId, type Day, type Result} from '../src/rom';
 
 export type Db = {all(sql: string, params?: string[]): Promise<any[]>};
 type Deps = {site: string; fetch: typeof fetch; load: () => Promise<any>; replayFn?: typeof replay; batch?: number};
 
 /** Replays pending wins; returns how many were confirmed, voided (`corrected`), or left alone (ROM changed since they were played). */
-export async function audit(db: Db, {site, fetch, load, replayFn = replay, batch = 10}: Deps, log: (s: string) => void = console.log) {
+export async function audit(db: Db, deps: Deps, log: (s: string) => void = console.log) {
   const out = {confirmed: 0, corrected: 0, skipped: 0};
+  for (const g of GAME_IDS.map(id => GAMES[id])) await auditGame(db, g, deps, log, out);
+  return out;
+}
+
+async function auditGame(db: Db, g: Game, {site, fetch, load, replayFn = replay, batch = 10}: Deps, log: (s: string) => void, out: {confirmed: number; corrected: number; skipped: number}) {
   let rows: any[];
   try {
-    rows = await db.all(`SELECT player_id, day, log FROM runs WHERE won = 1 AND verified = 0 AND log IS NOT NULL ORDER BY finished_at LIMIT ${batch}`);
+    rows = await db.all(`SELECT player_id, day, log FROM ${g.runs} WHERE won = 1 AND verified = 0 AND log IS NOT NULL ORDER BY finished_at LIMIT ${batch}`);
   } catch (e) {
     // The Worker adds this column on its first request after a deploy; until then there is nothing to audit.
-    if (/no such column: verified/.test(String(e))) { log('audit: no verified column yet (the Worker creates it on its first request after a deploy), nothing to do'); return out; }
+    if (/no such column: verified/.test(String(e))) { log('audit: no verified column yet (the Worker creates it on its first request after a deploy), nothing to do'); return; }
+    if (/no such table/.test(String(e))) { log(`audit: no ${g.runs} table yet (the Worker creates it on its first request after a deploy), nothing to do`); return; }
     throw e;
   }
-  if (!rows.length) return out;
+  if (!rows.length) return;
   const get = async (path: string) => { const r = await fetch(site + path); if (!r.ok) throw new Error(`${path}: ${r.status}`); return r; };
-  const rom = new Uint8Array(await (await get('/rom/oakle.gbc')).arrayBuffer());
-  const {config} = (await (await get('/rom/oakle.json')).json()) as {config: number};
+  const rom = new Uint8Array(await (await get(g.rom)).arrayBuffer());
+  const {config} = (await (await get(g.romMeta)).json()) as {config: number};
   const id = await romId(rom);
   const chunks = new Map<number, Promise<Day[]>>();
-  const days = (n: number) => { const k = Math.floor((n - 1) / 50); if (!chunks.has(k)) chunks.set(k, get(`/days/${k}.json`).then(r => r.json()).then((j: any) => j.days)); return chunks.get(k)!; };
+  const days = (n: number) => { const k = Math.floor((n - 1) / 50); if (!chunks.has(k)) chunks.set(k, get(`${g.days}${k}.json`).then(r => r.json()).then((j: any) => j.days)); return chunks.get(k)!; };
 
   type Decision = {kind: 'confirm' | 'void' | 'skip'; day: number; who: string; player: string; res: Result | null; why: string};
   const decisions: Decision[] = [];
@@ -41,7 +48,7 @@ export async function audit(db: Db, {site, fetch, load, replayFn = replay, batch
     const d = (await days(day)).find(x => x.day === day);
     if (events && !d) { decide('skip', null, 'no data for that day'); continue; }
     if (events && d && evidence.cfg && evidence.cfg !== (await dayId(d))) { decide('skip', null, 'the data for that day changed since it was played'); continue; }
-    const res: Result | null = events && d ? await replayFn(load, patchRom(rom, config, d, String(evidence.name ?? '')), events, day) : null;
+    const res: Result | null = events && d ? await replayFn(load, patchRom(rom, config, d, String(evidence.name ?? ''), g), events, day, g) : null;
     if (res?.won) decide('confirm', res);
     else decide('void', res, res ? 'the replay was not a win' : 'the replay never finished');
   }
@@ -55,20 +62,19 @@ export async function audit(db: Db, {site, fetch, load, replayFn = replay, batch
   for (const x of decisions) {
     const where = `WHERE player_id = ? AND day = ${x.day} AND verified = 0`;
     if (x.kind === 'confirm') { // the game itself says it was a win; its numbers replace the claimed ones
-      await db.all(`UPDATE runs SET turns = ${x.res!.turns | 0}, alive = ${x.res!.alive | 0}, verified = 1, log = NULL ${where}`, [x.player]);
+      await db.all(`UPDATE ${g.runs} SET turns = ${x.res!.turns | 0}, alive = ${x.res!.alive | 0}, verified = 1, log = NULL ${where}`, [x.player]);
       out.confirmed++; log(`day ${x.day} ${x.who}: confirmed, ${x.res!.turns} turns`);
     } else if (x.kind === 'skip') {
-      await db.all(`UPDATE runs SET verified = 2 ${where}`, [x.player]);
+      await db.all(`UPDATE ${g.runs} SET verified = 2 ${where}`, [x.player]);
       out.skipped++; log(`day ${x.day} ${x.who}: skipped, ${x.why}`);
     } else if (!suspicious) {
       // Not a win on replay: it stops counting. It is never turned into a loss (void: counted as neither). The evidence
       // stays on the row, and verified = 3 is what the page and the Worker read as "void".
-      await db.all(`UPDATE runs SET finished_at = NULL, won = NULL, turns = NULL, alive = NULL, verified = 3 ${where}`, [x.player]);
+      await db.all(`UPDATE ${g.runs} SET finished_at = NULL, won = NULL, turns = NULL, alive = NULL, verified = 3 ${where}`, [x.player]);
       out.corrected++; log(`day ${x.day} ${x.who}: VOIDED (${x.why})`);
     }
   }
   if (suspicious) throw new Error('audit: suspicious batch, nothing voided');
-  return out;
 }
 
 /** Cloudflare's D1 REST API: POST /accounts/{id}/d1/database/{id}/query, rows in result[0].results. */

@@ -1,7 +1,7 @@
 diff -ruN pokeyellow-pristine/data/maps/objects/ChampionsRoom.asm src/data/maps/objects/ChampionsRoom.asm
 --- pokeyellow-pristine/data/maps/objects/ChampionsRoom.asm	2026-09-03 03:23:57
-+++ src/data/maps/objects/ChampionsRoom.asm	2026-10-13 13:59:52
-@@ -6,10 +6,7 @@
++++ src/data/maps/objects/ChampionsRoom.asm	2026-11-04 15:54:24
+@@ -6,15 +6,12 @@
  	db $3 ; border block
  
  	def_warp_events
@@ -13,15 +13,21 @@ diff -ruN pokeyellow-pristine/data/maps/objects/ChampionsRoom.asm src/data/maps/
  
  	def_bg_events
  
+ 	def_object_events
+ 	object_event  4,  2, SPRITE_BLUE, STAY, DOWN, TEXT_CHAMPIONSROOM_RIVAL
+-	object_event  3,  7, SPRITE_OAK, STAY, UP, TEXT_CHAMPIONSROOM_OAK
++	object_event  3,  2, SPRITE_OAK, STAY, DOWN, TEXT_CHAMPIONSROOM_OAK ; Oakle: already standing in front of you, no walk-in
+ 
+ 	def_warps_to CHAMPIONS_ROOM
 diff -ruN pokeyellow-pristine/data/maps/special_warps.asm src/data/maps/special_warps.asm
 --- pokeyellow-pristine/data/maps/special_warps.asm	2026-09-03 03:23:57
-+++ src/data/maps/special_warps.asm	2026-10-12 15:31:57
++++ src/data/maps/special_warps.asm	2026-11-04 15:54:24
 @@ -45,7 +45,7 @@
  ENDM
  
  NewGameWarp:
 -	special_warp_spec REDS_HOUSE_2F, 3, 6, REDS_HOUSE_2
-+	special_warp_spec CHAMPIONS_ROOM, 4, 3, GYM
++	special_warp_spec CHAMPIONS_ROOM, 3, 3, GYM ; right under Oak
  TradeCenterPlayerWarp:
  	special_warp_spec TRADE_CENTER,  3, 4, CLUB
  TradeCenterFriendWarp:
@@ -560,7 +566,7 @@ diff -ruN pokeyellow-pristine/main.asm src/main.asm
  INCLUDE "engine/math/bcd.asm"
 diff -ruN pokeyellow-pristine/scripts/ChampionsRoom.asm src/scripts/ChampionsRoom.asm
 --- pokeyellow-pristine/scripts/ChampionsRoom.asm	2026-09-03 03:23:57
-+++ src/scripts/ChampionsRoom.asm	2026-10-13 10:49:14
++++ src/scripts/ChampionsRoom.asm	2026-11-04 15:55:28
 @@ -24,6 +24,8 @@
  	dw_const ChampionsRoomOakExitsScript,                 SCRIPT_CHAMPIONSROOM_OAK_EXITS
  	dw_const ChampionsRoomPlayerFollowsOakScript,         SCRIPT_CHAMPIONSROOM_PLAYER_FOLLOWS_OAK
@@ -570,7 +576,7 @@ diff -ruN pokeyellow-pristine/scripts/ChampionsRoom.asm src/scripts/ChampionsRoo
  
  ChampionsRoomDefaultScript:
  	ret
-@@ -99,10 +101,8 @@
+@@ -99,17 +101,11 @@
  	ret
  
  ChampionsRoomOakArrivesScript:
@@ -578,12 +584,29 @@ diff -ruN pokeyellow-pristine/scripts/ChampionsRoom.asm src/scripts/ChampionsRoo
 -	ld a, TEXT_CHAMPIONSROOM_OAK
 -	ldh [hTextID], a
 -	call ChampionsRoom_DisplayTextID_AllowABSelectStart
+-	ld a, CHAMPIONSROOM_OAK
 +	ld a, PAD_BUTTONS | PAD_CTRL_PAD ; Oakle: no rival dialogue, Oak just walks in
 +	ld [wJoyIgnore], a
- 	ld a, CHAMPIONSROOM_OAK
++	ld a, CHAMPIONSROOM_OAK ; Oakle: Oak is already in place, so there is no walk-in to wait for
  	ldh [hSpriteIndex], a
  	call SetSpriteMovementBytesToFF
-@@ -144,10 +144,19 @@
+-	ld de, OakEntranceAfterVictoryMovement
+-	ld a, CHAMPIONSROOM_OAK
+-	ldh [hSpriteIndex], a
+-	call MoveSprite
+ 	ld a, TOGGLE_CHAMPIONS_ROOM_OAK
+ 	ld [wToggleableObjectIndex], a
+ 	predef ShowObject
+@@ -129,7 +125,7 @@
+ 	ld a, [wStatusFlags5]
+ 	bit BIT_SCRIPTED_NPC_MOVEMENT, a
+ 	ret nz
+-	ld a, PLAYER_DIR_LEFT
++	ld a, PLAYER_DIR_UP
+ 	ld [wPlayerMovingDirection], a
+ 	ld a, CHAMPIONSROOM_RIVAL
+ 	ldh [hSpriteIndex], a
+@@ -144,10 +140,19 @@
  	ld a, TEXT_CHAMPIONSROOM_OAK_CONGRATULATES_PLAYER
  	ldh [hTextID], a
  	call ChampionsRoom_DisplayTextID_AllowABSelectStart
@@ -604,7 +627,7 @@ diff -ruN pokeyellow-pristine/scripts/ChampionsRoom.asm src/scripts/ChampionsRoo
  ChampionsRoomOakDisappointedWithRivalScript:
  	ld a, CHAMPIONSROOM_OAK
  	ldh [hSpriteIndex], a
-@@ -265,7 +274,47 @@
+@@ -265,7 +270,47 @@
  	text_end
  
  ChampionsRoomOakText:
@@ -616,7 +639,7 @@ diff -ruN pokeyellow-pristine/scripts/ChampionsRoom.asm src/scripts/ChampionsRoo
 +	call PrintText
 +	jp TextScriptEnd
 +.battle
-+	ld hl, .ReadyText
++	ld hl, .ReadyText ; Oakle: one short line (the text engine always waits for a button), his "prepare your team" speech is already on screen at the start
 +	call PrintText
 +	call Delay3
 +	ld hl, wStatusFlags3
@@ -654,8 +677,8 @@ diff -ruN pokeyellow-pristine/scripts/ChampionsRoom.asm src/scripts/ChampionsRoo
  ChampionsRoomOakCongratulatesPlayerText:
 diff -ruN pokeyellow-pristine/text/ChampionsRoom.asm src/text/ChampionsRoom.asm
 --- pokeyellow-pristine/text/ChampionsRoom.asm	2026-09-03 03:23:57
-+++ src/text/ChampionsRoom.asm	2026-10-13 18:24:41
-@@ -82,25 +82,37 @@
++++ src/text/ChampionsRoom.asm	2026-11-04 16:04:51
+@@ -82,25 +82,40 @@
  	done
  
  _ChampionsRoomOakText::
@@ -705,6 +728,9 @@ diff -ruN pokeyellow-pristine/text/ChampionsRoom.asm src/text/ChampionsRoom.asm
 +	text "OAK: <PLAYER>!"
 +	line "Prepare your team"
 +	cont "to battle me!"
++
++	para "Talk to me when"
++	line "you are ready."
  	done
  
  _ChampionsRoomOakDisappointedWithRivalText::

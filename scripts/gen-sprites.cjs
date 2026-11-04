@@ -89,7 +89,27 @@ function encodeRgba({w, h, rgba}) {
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw, {level: 9})), chunk('IEND', Buffer.alloc(0))]);
 }
 
+// Crystal: the game's internal species id is the Pokedex number (1-251), and PokeAPI already has transparent PNGs.
+const CRYSTAL_BASE = 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-ii/crystal/transparent/';
+async function crystalSprites() {
+  const out = path.join(__dirname, '..', 'public', 'sprites', 'crystal');
+  fs.mkdirSync(out, {recursive: true});
+  const queue = Array.from({length: 251}, (_, i) => i + 1).filter(n => !fs.existsSync(path.join(out, `${n}.png`)));
+  let failed = 0;
+  await Promise.all(Array.from({length: 8}, async () => {
+    for (let n; (n = queue.shift());) {
+      try {
+        const r = await fetch(`${CRYSTAL_BASE}${n}.png`);
+        if (!r.ok) throw new Error(String(r.status));
+        fs.writeFileSync(path.join(out, `${n}.png`), Buffer.from(await r.arrayBuffer()));
+      } catch { failed++; }
+    }
+  }));
+  console.log(`gen-sprites: ${251 - failed} of 251 Crystal sprites in public/sprites/crystal${failed ? `; ${failed} could not be downloaded, the page will skip them` : ''}`);
+}
+
 async function main() {
+  await crystalSprites();
   if (!fs.existsSync(path.join(SRC, 'data', 'pokemon', 'dex_order.asm'))) { console.log('gen-sprites: no pret source yet, skipping (run npm run rom first)'); return; }
   const map = speciesToDex();
   fs.mkdirSync(OUT, {recursive: true});

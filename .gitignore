@@ -10,6 +10,9 @@ rom/tools/
 public/rom/
 rom/src/
 rom/variant/
+rom/crystal/pokecrystal-pristine/
+rom/crystal/work/
+rom/crystal/src/
 
 # personal / local tooling and notes
 .claude/

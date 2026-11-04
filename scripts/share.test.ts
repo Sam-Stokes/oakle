@@ -1,6 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import {bands, rowFrom, shareText} from '../src/share';
 import {readParty} from '../src/rom';
+import {GAMES} from '../src/games';
 
 const base = {day: 1, link: 'https://oakle.day'};
 describe('share text', () => {
@@ -47,3 +48,20 @@ describe('party memory', () => {
     expect(readParty(a => ram.get(a) ?? 0)).toEqual([[0x012c, 0x0190], [0, 100]]);
   });
 });
+
+describe('Crystal share cards', () => {
+  const C = GAMES.crystal;
+  it('title names the game and Elm, six squares', () => {
+    const party: [number, number][] = [[0, 300], [20, 300], [100, 300], [250, 300], [300, 300], [300, 300]];
+    expect(shareText({game: C, day: 3, link: 'https://oakle.day', won: true, turns: 24, alive: 5, party})).toBe('Oakle Crystal #3 — I beat Elm in 24 turns\n⬛🟥🟨🟩🟩🟩\nhttps://oakle.day');
+    expect(shareText({game: C, day: 3, link: '', won: false, turns: 1, alive: 0, who: 'ASH'})).toBe('Oakle Crystal #3 — ASH lost to Elm in 1 turn\n⬛⬛⬛⬛⬛⬛');
+  });
+  it('bands and rows use the game\'s party size', () => {
+    const six: [number, number][] = [[0, 300], [20, 300], [100, 300], [250, 300], [300, 300], [300, 300]];
+    expect(bands(six, C)).toBe('012333');
+    expect(bands(six)).toBe(''); // not a Yellow party
+    expect(rowFrom('012333', 5, C)).toBe('⬛🟥🟨🟩🟩🟩');
+    expect(rowFrom('01233', 4, C)).toBe('🟩🟩🟩🟩⬛⬛'); // five digits is not a Crystal party
+  });
+});
+

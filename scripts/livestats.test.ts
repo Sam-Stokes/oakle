@@ -17,7 +17,7 @@ describe('/api/stats', () => {
     await t.play('a', 'ASH', true, 12, 2, TODAY - 1);
     const r = await t.call('/api/stats');
     expect(r.headers.get('cache-control')).toBe('public, max-age=10');
-    expect(await r.json()).toEqual({trainers: 4, games: 3});
+    expect(await r.json()).toEqual({trainers: 4, games: 3, yellow: 3, crystal: 0});
   });
 
   it('is shared for a few seconds, then picks up new battles', async () => {

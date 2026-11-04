@@ -1,0 +1,1318 @@
+diff -ruN -x elm.png pokecrystal-pristine/constants/trainer_constants.asm src/constants/trainer_constants.asm
+--- pokecrystal-pristine/constants/trainer_constants.asm	2026-10-31 12:51:20
++++ src/constants/trainer_constants.asm	2026-11-04 14:43:01
+@@ -70,6 +70,9 @@
+ 	const RIVAL1_5_TOTODILE
+ 
+ 	trainerclass POKEMON_PROF ; a
++	const ELM1 ; Meganium
++	const ELM2 ; Typhlosion
++	const ELM3 ; Feraligatr
+ 
+ 	trainerclass WILL ; b
+ 	const WILL1
+diff -ruN -x elm.png pokecrystal-pristine/data/maps/spawn_points.asm src/data/maps/spawn_points.asm
+--- pokecrystal-pristine/data/maps/spawn_points.asm	2026-10-31 12:51:20
++++ src/data/maps/spawn_points.asm	2026-11-04 15:55:45
+@@ -8,7 +8,7 @@
+ ; entries correspond to SPAWN_* constants
+ 	table_width 4
+ 
+-	spawn PLAYERS_HOUSE_2F,            3,  3
++	spawn LANCES_ROOM,                 5,  4 ; Oakle: SPAWN_HOME, right under Elm
+ 	spawn VIRIDIAN_POKECENTER_1F,      5,  3
+ 
+ 	spawn PALLET_TOWN,                 5,  6
+diff -ruN -x elm.png pokecrystal-pristine/data/trainers/attributes.asm src/data/trainers/attributes.asm
+--- pokecrystal-pristine/data/trainers/attributes.asm	2026-10-31 12:51:20
++++ src/data/trainers/attributes.asm	2026-11-04 14:43:01
+@@ -59,7 +59,7 @@
+ ; Pokemon Prof
+ 	db NO_ITEM, NO_ITEM ; items
+ 	db 25 ; base reward
+-	dw AI_BASIC | AI_AGGRESSIVE | AI_STATUS
++	dw AI_BASIC | AI_SETUP | AI_SMART | AI_AGGRESSIVE | AI_CAUTIOUS | AI_STATUS | AI_RISKY
+ 	dw CONTEXT_USE | SWITCH_SOMETIMES
+ 
+ ; Will
+diff -ruN -x elm.png pokecrystal-pristine/data/trainers/palettes.asm src/data/trainers/palettes.asm
+--- pokecrystal-pristine/data/trainers/palettes.asm	2026-10-31 12:51:20
++++ src/data/trainers/palettes.asm	2026-11-04 15:27:45
+@@ -18,7 +18,7 @@
+ INCBIN "gfx/trainers/chuck.gbcpal", middle_colors
+ INCBIN "gfx/trainers/clair.gbcpal", middle_colors
+ INCBIN "gfx/trainers/rival1.gbcpal", middle_colors
+-INCBIN "gfx/trainers/oak.gbcpal", middle_colors
++INCBIN "gfx/trainers/elm.gbcpal", middle_colors
+ INCBIN "gfx/trainers/will.gbcpal", middle_colors
+ INCBIN "gfx/trainers/cal.gbcpal", middle_colors
+ INCBIN "gfx/trainers/bruno.gbcpal", middle_colors
+diff -ruN -x elm.png pokecrystal-pristine/data/trainers/parties.asm src/data/trainers/parties.asm
+--- pokecrystal-pristine/data/trainers/parties.asm	2026-10-31 12:51:20
++++ src/data/trainers/parties.asm	2026-11-04 14:43:01
+@@ -192,6 +192,35 @@
+ 	db -1 ; end
+ 
+ PokemonProfGroup:
++	; ELM (1) Meganium
++	db "ELM@", TRAINERTYPE_MOVES
++	db 100, ESPEON,    PSYCHIC_M, SHADOW_BALL, SWIFT, IRON_TAIL
++	db 100, AMPHAROS,  THUNDER, FIRE_PUNCH, THUNDER_WAVE, LIGHT_SCREEN
++	db 100, TOGETIC,   FLY, PSYCHIC_M, FLAMETHROWER, DOUBLE_EDGE
++	db 100, MEGANIUM, SOLARBEAM, EARTHQUAKE, BODY_SLAM, LIGHT_SCREEN
++	db 100, STEELIX,   EARTHQUAKE, CRUNCH, IRON_TAIL, SANDSTORM
++	db 100, TYRANITAR, CRUNCH, ROCK_SLIDE, EARTHQUAKE, FIRE_BLAST
++	db -1 ; end
++
++	; ELM (2) Typhlosion
++	db "ELM@", TRAINERTYPE_MOVES
++	db 100, ESPEON,    PSYCHIC_M, SHADOW_BALL, SWIFT, IRON_TAIL
++	db 100, AMPHAROS,  THUNDER, FIRE_PUNCH, THUNDER_WAVE, LIGHT_SCREEN
++	db 100, TOGETIC,   FLY, PSYCHIC_M, FLAMETHROWER, DOUBLE_EDGE
++	db 100, TYPHLOSION, FIRE_BLAST, EARTHQUAKE, THUNDERPUNCH, SWIFT
++	db 100, STEELIX,   EARTHQUAKE, CRUNCH, IRON_TAIL, SANDSTORM
++	db 100, TYRANITAR, CRUNCH, ROCK_SLIDE, EARTHQUAKE, FIRE_BLAST
++	db -1 ; end
++
++	; ELM (3) Feraligatr
++	db "ELM@", TRAINERTYPE_MOVES
++	db 100, ESPEON,    PSYCHIC_M, SHADOW_BALL, SWIFT, IRON_TAIL
++	db 100, AMPHAROS,  THUNDER, FIRE_PUNCH, THUNDER_WAVE, LIGHT_SCREEN
++	db 100, TOGETIC,   FLY, PSYCHIC_M, FLAMETHROWER, DOUBLE_EDGE
++	db 100, FERALIGATR, SURF, ICE_BEAM, EARTHQUAKE, SLASH
++	db 100, STEELIX,   EARTHQUAKE, CRUNCH, IRON_TAIL, SANDSTORM
++	db 100, TYRANITAR, CRUNCH, ROCK_SLIDE, EARTHQUAKE, FIRE_BLAST
++	db -1 ; end
+ 
+ WillGroup:
+ 	; WILL (1)
+diff -ruN -x elm.png pokecrystal-pristine/engine/battle/ai/items.asm src/engine/battle/ai/items.asm
+--- pokecrystal-pristine/engine/battle/ai/items.asm	2026-10-31 12:51:20
++++ src/engine/battle/ai/items.asm	2026-11-04 14:43:01
+@@ -52,7 +52,7 @@
+ 
+ 	cp $10
+ 	jr nz, .not_10
+-	call Random
++	call BattleRandom
+ 	cp 50 percent + 1
+ 	jr c, .switch
+ 	jp DontSwitch
+@@ -60,14 +60,14 @@
+ 
+ 	cp $20
+ 	jr nz, .not_20
+-	call Random
++	call BattleRandom
+ 	cp 79 percent - 1
+ 	jr c, .switch
+ 	jp DontSwitch
+ .not_20
+ 
+ 	; $30
+-	call Random
++	call BattleRandom
+ 	cp 4 percent
+ 	jp c, DontSwitch
+ 
+@@ -87,7 +87,7 @@
+ 
+ 	cp $10
+ 	jr nz, .not_10
+-	call Random
++	call BattleRandom
+ 	cp 8 percent
+ 	jr c, .switch
+ 	jp DontSwitch
+@@ -95,14 +95,14 @@
+ 
+ 	cp $20
+ 	jr nz, .not_20
+-	call Random
++	call BattleRandom
+ 	cp 12 percent
+ 	jr c, .switch
+ 	jp DontSwitch
+ .not_20
+ 
+ 	; $30
+-	call Random
++	call BattleRandom
+ 	cp 79 percent - 1
+ 	jp c, DontSwitch
+ 
+@@ -121,7 +121,7 @@
+ 
+ 	cp $10
+ 	jr nz, .not_10
+-	call Random
++	call BattleRandom
+ 	cp 20 percent - 1
+ 	jr c, .switch
+ 	jp DontSwitch
+@@ -129,14 +129,14 @@
+ 
+ 	cp $20
+ 	jr nz, .not_20
+-	call Random
++	call BattleRandom
+ 	cp 50 percent + 1
+ 	jr c, .switch
+ 	jp DontSwitch
+ .not_20
+ 
+ 	; $30
+-	call Random
++	call BattleRandom
+ 	cp 20 percent - 1
+ 	jp c, DontSwitch
+ 
+@@ -303,7 +303,7 @@
+ 	ld a, [bc]
+ 	bit ALWAYS_USE_F, a
+ 	jp nz, .Use
+-	call Random
++	call BattleRandom
+ 	cp 20 percent - 1
+ 	jp c, .Use
+ 	jp .DontUse
+@@ -315,7 +315,7 @@
+ 	ld a, [wEnemyToxicCount]
+ 	cp 4
+ 	jr c, .FailToxicCheck
+-	call Random
++	call BattleRandom
+ 	cp 50 percent + 1
+ 	jp c, .Use
+ .FailToxicCheck:
+@@ -354,7 +354,7 @@
+ 	jp nz, .CheckQuarterHP
+ 	callfar AICheckEnemyQuarterHP
+ 	jp nc, .UseHealItem
+-	call Random
++	call BattleRandom
+ 	cp 50 percent + 1
+ 	jp c, .UseHealItem
+ 	jp .DontUse
+@@ -362,7 +362,7 @@
+ .CheckQuarterHP:
+ 	callfar AICheckEnemyQuarterHP
+ 	jp c, .DontUse
+-	call Random
++	call BattleRandom
+ 	cp 20 percent - 1
+ 	jp c, .DontUse
+ 	jr .UseHealItem
+@@ -372,7 +372,7 @@
+ 	jp c, .DontUse
+ 	callfar AICheckEnemyQuarterHP
+ 	jp nc, .UseHealItem
+-	call Random
++	call BattleRandom
+ 	cp 20 percent - 1
+ 	jp nc, .DontUse
+ 
+@@ -429,7 +429,7 @@
+ 	ld a, [bc]
+ 	bit UNKNOWN_USE_F, a
+ 	jp z, .Use
+-	call Random
++	call BattleRandom
+ 	cp 50 percent + 1
+ 	jp c, .Use
+ 
+@@ -441,7 +441,7 @@
+ 	ld a, [bc]
+ 	bit UNKNOWN_USE_F, a
+ 	jp z, .DontUse
+-	call Random
++	call BattleRandom
+ 	cp 39 percent + 1
+ 	jp c, .Use
+ 	jp .DontUse
+@@ -497,13 +497,13 @@
+ 	ld a, [bc]
+ 	bit ALWAYS_USE_F, a
+ 	jp nz, .Use
+-	call Random
++	call BattleRandom
+ 	cp 50 percent + 1
+ 	jp c, .DontUse
+ 	ld a, [bc]
+ 	bit CONTEXT_USE_F, a
+ 	jp nz, .Use
+-	call Random
++	call BattleRandom
+ 	cp 50 percent + 1
+ 	jp c, .DontUse
+ 	jp .Use
+@@ -511,7 +511,7 @@
+ 	ld a, [bc]
+ 	bit ALWAYS_USE_F, a
+ 	jp z, .DontUse
+-	call Random
++	call BattleRandom
+ 	cp 20 percent - 1
+ 	jp nc, .DontUse
+ 	jp .Use
+diff -ruN -x elm.png pokecrystal-pristine/engine/battle/ai/scoring.asm src/engine/battle/ai/scoring.asm
+--- pokecrystal-pristine/engine/battle/ai/scoring.asm	2026-10-31 12:51:20
++++ src/engine/battle/ai/scoring.asm	2026-11-04 14:43:01
+@@ -133,7 +133,7 @@
+ 	jr .checkmove
+ 
+ .discourage
+-	call Random
++	call BattleRandom
+ 	cp 12 percent
+ 	jr c, .checkmove
+ 	inc [hl]
+@@ -435,7 +435,7 @@
+ 	ret
+ 
+ .discourage
+-	call Random
++	call BattleRandom
+ 	cp 39 percent + 1
+ 	ret c
+ 
+@@ -572,7 +572,7 @@
+ 
+ ; If enemy's HP is between 25% and 50%,
+ ; over 90% chance to greatly discourage this move.
+-	call Random
++	call BattleRandom
+ 	cp 8 percent
+ 	ret c
+ 
+@@ -586,7 +586,7 @@
+ ; 90% chance to greatly encourage this move.
+ ; The AI_Basic layer will make sure that
+ ; Dream Eater is only used against sleeping targets.
+-	call Random
++	call BattleRandom
+ 	cp 10 percent
+ 	ret c
+ 	dec [hl]
+@@ -610,7 +610,7 @@
+ 	jr nz, .greatly_encourage
+ 
+ ; ...70% chance to greatly encourage this move if player is not badly poisoned.
+-	call Random
++	call BattleRandom
+ 	cp 70 percent
+ 	jr nc, .not_encouraged
+ 
+@@ -626,7 +626,7 @@
+ 	jr nc, .hp_mismatch_2
+ 
+ ; If enemy's HP is above 25% but not full, 4% chance to greatly encourage this move.
+-	call Random
++	call BattleRandom
+ 	cp 4 percent
+ 	jr c, .greatly_encourage
+ 
+@@ -686,7 +686,7 @@
+ ; 70% chance to greatly encourage this move.
+ ; This would counter any previous discouragement.
+ .maybe_greatly_encourage
+-	call Random
++	call BattleRandom
+ 	cp 31 percent + 1
+ 	ret c
+ 
+@@ -759,7 +759,7 @@
+ 	call AICompareSpeed
+ 	ret nc
+ 
+-	call Random
++	call BattleRandom
+ 	cp 10 percent
+ 	ret c
+ 
+@@ -781,7 +781,7 @@
+ 	jr nz, .greatly_encourage
+ 
+ ; ...70% chance to greatly encourage this move if player is not badly poisoned.
+-	call Random
++	call BattleRandom
+ 	cp 70 percent
+ 	jr nc, .not_encouraged
+ 
+@@ -797,7 +797,7 @@
+ 	jr nc, .hp_mismatch_2
+ 
+ ; If player's HP is above 25% but not full, 4% chance to greatly encourage this move.
+-	call Random
++	call BattleRandom
+ 	cp 4 percent
+ 	jr c, .greatly_encourage
+ 
+@@ -853,7 +853,7 @@
+ ; 70% chance to greatly encourage this move.
+ ; This would counter any previous discouragement.
+ .maybe_greatly_encourage
+-	call Random
++	call BattleRandom
+ 	cp 31 percent + 1
+ 	ret c
+ 
+@@ -897,7 +897,7 @@
+ 
+ .encourage
+ 	pop hl
+-	call Random
++	call BattleRandom
+ 	cp 16 percent
+ 	ret c
+ 	dec [hl]
+@@ -916,7 +916,7 @@
+ 
+ 	call AICheckEnemyMaxHP
+ 	ret c
+-	call Random
++	call BattleRandom
+ 	cp 10 percent
+ 	ret c
+ 	inc [hl]
+@@ -954,7 +954,7 @@
+ 	ret
+ 
+ .encourage
+-	call Random
++	call BattleRandom
+ 	cp 10 percent
+ 	ret c
+ 	dec [hl]
+@@ -976,7 +976,7 @@
+ 
+ 	call AICheckEnemyMaxHP
+ 	ret c
+-	call Random
++	call BattleRandom
+ 	cp 8 percent
+ 	ret c
+ 	inc [hl]
+@@ -1073,7 +1073,7 @@
+ 	ret c
+ 
+ .maybe_discourage
+-	call Random
++	call BattleRandom
+ 	cp 79 percent - 1
+ 	ret c
+ 
+@@ -1092,7 +1092,7 @@
+ ; 90% chance to discourage this move if player's HP is between 25% and 50%.
+ 	call AICheckPlayerHalfHP
+ 	ret c
+-	call Random
++	call BattleRandom
+ 	cp 10 percent
+ 	jr c, .discourage
+ 	inc [hl]
+@@ -1204,7 +1204,7 @@
+ 	ret nz
+ 	call AICompareSpeed
+ 	ret c
+-	call Random
++	call BattleRandom
+ 	cp 12 percent
+ 	ret c
+ 	dec [hl]
+@@ -1232,7 +1232,7 @@
+ 
+ .discourage
+ ; If enemy's HP is above 50%, discourage this move at random
+-	call Random
++	call BattleRandom
+ 	cp 16 percent
+ 	ret c
+ 	inc [hl]
+@@ -1380,7 +1380,7 @@
+ 	jr nc, .done
+ 
+ .encourage
+-	call Random
++	call BattleRandom
+ 	cp 39 percent + 1
+ 	jr c, .done
+ 
+@@ -1431,7 +1431,7 @@
+ 	jr nc, .discourage
+ 
+ .encourage
+-	call Random
++	call BattleRandom
+ 	cp 28 percent - 1
+ 	ret c
+ 	dec [hl]
+@@ -1539,7 +1539,7 @@
+ 	cp 15
+ 	jr nc, .discourage
+ 
+-	call Random
++	call BattleRandom
+ 	cp 39 percent + 1
+ 	ret nc
+ 
+@@ -1548,7 +1548,7 @@
+ 	ret
+ 
+ .encourage
+-	call Random
++	call BattleRandom
+ 	cp 39 percent + 1
+ 	ret c
+ 	dec [hl]
+@@ -1698,7 +1698,7 @@
+ 	ret
+ 
+ .discourage
+-	call Random
++	call BattleRandom
+ 	cp 10 percent
+ 	ret c
+ 	inc [hl]
+@@ -1717,7 +1717,7 @@
+ 	pop hl
+ 	jr nc, .notencourage
+ 
+-	call Random
++	call BattleRandom
+ 	cp 39 percent + 1
+ 	ret c
+ 	dec [hl]
+@@ -1729,7 +1729,7 @@
+ 	ret nz
+ 
+ .discourage
+-	call Random
++	call BattleRandom
+ 	cp 8 percent
+ 	ret c
+ 	inc [hl]
+@@ -1958,7 +1958,7 @@
+ 	inc [hl]
+ 
+ .discourage
+-	call Random
++	call BattleRandom
+ 	cp 8 percent
+ 	ret c
+ 
+@@ -1986,7 +1986,7 @@
+ 	jr z, .encourage
+ 
+ ; 92% chance to discourage this move otherwise.
+-	call Random
++	call BattleRandom
+ 	cp 8 percent
+ 	ret c
+ 
+@@ -1994,7 +1994,7 @@
+ 	ret
+ 
+ .encourage
+-	call Random
++	call BattleRandom
+ 	cp 39 percent + 1
+ 	ret c
+ 
+@@ -2177,7 +2177,7 @@
+ 	jr nc, .maybe_discourage
+ 
+ ; 80% chance to greatly encourage this move otherwise.
+-	call Random
++	call BattleRandom
+ 	cp 79 percent - 1
+ 	ret nc
+ 	dec [hl]
+@@ -2205,7 +2205,7 @@
+ 	ret
+ 
+ .first_turn
+-	call Random
++	call BattleRandom
+ 	cp 79 percent - 1
+ 	ret nc
+ 	dec [hl]
+@@ -2565,7 +2565,7 @@
+ 	jr c, .done
+ 
+ .encourage
+-	call Random
++	call BattleRandom
+ 	cp 39 percent + 1
+ 	jr c, .done
+ 	dec [hl]
+@@ -2645,7 +2645,7 @@
+ 	cp WEATHER_RAIN
+ 	ret nz
+ 
+-	call Random
++	call BattleRandom
+ 	cp 10 percent
+ 	ret c
+ 
+@@ -2668,7 +2668,7 @@
+ 	cp WEATHER_SUN
+ 	ret nz
+ 
+-	call Random
++	call BattleRandom
+ 	cp 10 percent
+ 	ret c
+ 
+@@ -3087,7 +3087,7 @@
+ 	jr nc, .loop
+ 
+ ; BUG: "Cautious" AI may fail to discourage residual moves (see docs/bugs_and_glitches.md)
+-	call Random
++	call BattleRandom
+ 	cp 90 percent + 1
+ 	ret nc
+ 
+@@ -3196,7 +3196,7 @@
+ 	jr c, .nextmove
+ 
+ ; Else, 80% chance to exclude them.
+-	call Random
++	call BattleRandom
+ 	cp 79 percent - 1
+ 	jr c, .nextmove
+ 
+@@ -3258,11 +3258,11 @@
+ 	ret
+ 
+ AI_80_20:
+-	call Random
++	call BattleRandom
+ 	cp 20 percent - 1
+ 	ret
+ 
+ AI_50_50:
+-	call Random
++	call BattleRandom
+ 	cp 50 percent + 1
+ 	ret
+diff -ruN -x elm.png pokecrystal-pristine/engine/battle/core.asm src/engine/battle/core.asm
+--- pokecrystal-pristine/engine/battle/core.asm	2026-10-31 12:51:20
++++ src/engine/battle/core.asm	2026-11-04 14:43:01
+@@ -199,6 +199,11 @@
+ 	call ParsePlayerAction
+ 	jr nz, .loop1
+ 
++	ld hl, wUnusedScriptByte ; Oakle: turn counter, saturating
++	inc [hl]
++	jr nz, .oakleTurnCounted
++	dec [hl]
++.oakleTurnCounted
+ 	call EnemyTriesToFlee
+ 	jr c, .quit
+ 
+@@ -2388,7 +2393,7 @@
+ 	call PrintWinLossText
+ .skip_win_loss_text
+ 
+-	jp .give_money
++	ret ; Oakle: no prize money
+ 
+ .mobile
+ 	call BattleWinSlideInEnemyTrainerFrontpic
+@@ -6887,10 +6892,7 @@
+ ; If the normal RNG is used in a link battle it'll desync.
+ ; To circumvent this a shared PRNG is used instead.
+ 
+-; But if we're in a non-link battle we're safe to use it
+-	ld a, [wLinkMode]
+-	and a
+-	jp z, Random
++; Oakle: always the shared PRNG, so every player gets the same dice.
+ 
+ ; The PRNG operates in streams of 10 values.
+ 
+@@ -6981,6 +6983,7 @@
+ 	ret
+ 
+ GiveExperiencePoints:
++	ret ; Oakle: everyone is level 100, so no experience, no stat exp and no level-up or evolution prompts
+ ; Give experience.
+ ; Don't give experience if linked or in the Battle Tower.
+ 	ld a, [wLinkMode]
+diff -ruN -x elm.png pokecrystal-pristine/engine/menus/intro_menu.asm src/engine/menus/intro_menu.asm
+--- pokecrystal-pristine/engine/menus/intro_menu.asm	2026-10-31 12:51:20
++++ src/engine/menus/intro_menu.asm	2026-11-04 14:43:01
+@@ -77,6 +77,26 @@
+ 	ldh [hMapEntryMethod], a
+ 	jp FinishContinueFunction
+ 
++; Oakle: replaces the intro, title screen, main menu and New Game speech. Boots straight into Lance's room
++; (SPAWN_HOME in data/maps/spawn_points.asm) with the daily party from OakleConfig.
++OakleStart:
++	xor a
++	ld [wDebugFlags], a
++	call ResetWRAM
++	call NewGame_ClearTilemapEtc
++	farcall OakleSetup
++	call InitializeWorld
++
++	ld a, LANDMARK_NEW_BARK_TOWN
++	ld [wPrevLandmark], a
++
++	ld a, SPAWN_HOME
++	ld [wDefaultSpawnpoint], a
++
++	ld a, MAPSETUP_WARP
++	ldh [hMapEntryMethod], a
++	jp FinishContinueFunction
++
+ PlayerProfileSetup:
+ 	farcall CheckMobileAdapterStatus
+ 	jr c, .ok
+@@ -1341,4 +1361,4 @@
+ 	ld a, $90
+ 	ldh [hWY], a
+ 	call WaitBGMap
+-	jp IntroSequence
++	jp OakleStart
+diff -ruN -x elm.png pokecrystal-pristine/engine/oakle/oakle.asm src/engine/oakle/oakle.asm
+--- pokecrystal-pristine/engine/oakle/oakle.asm	1970-01-01 12:00:00
++++ src/engine/oakle/oakle.asm	2026-11-04 14:43:01
+@@ -0,0 +1,200 @@
++; Oakle: daily config (the web page overwrites these bytes in the ROM before boot), party setup and battle finish.
++; Lives in bank 3 next to TryAddMonToParty, FillPP and CalcMonStats.
++
++DEF OAKLE_CFG_TRAINER_NO EQU 6  ; Elm trainer number 1-3 (picks his starter)
++DEF OAKLE_CFG_DAY        EQU 7  ; dw day number, informational
++DEF OAKLE_CFG_RNG        EQU 9  ; SERIAL_RNS_LENGTH (10) seed bytes for the shared battle RNG
++DEF OAKLE_CFG_NAME       EQU 19 ; player name, NAME_LENGTH (11) bytes ("@" terminated)
++DEF OAKLE_CFG_PARTY      EQU 30 ; 6 x (species, move1..move4)
++
++OakleConfig::
++	db $4f, $41, $4b, $4c, $45, 1 ; ASCII "OAKLE" + format version (raw bytes, not the game charset)
++	db 1                          ; trainer number: 1 MEGANIUM, 2 TYPHLOSION, 3 FERALIGATR
++	dw 1                          ; day
++	db 11, 22, 33, 44, 55, 66, 77, 88, 99, 111 ; RNG seed
++	db "GOLD@@@@@@@"              ; player name
++	db ALAKAZAM, PSYCHIC_M,  RECOVER,    THUNDER_WAVE, SEISMIC_TOSS
++	db SNORLAX,  BODY_SLAM,  EARTHQUAKE, HYPER_BEAM,   REST
++	db STARMIE,  SURF,       BLIZZARD,   THUNDERBOLT,  RECOVER
++	db CHANSEY,  SOFTBOILED, ICE_BEAM,   THUNDERBOLT,  THUNDER_WAVE
++	db ZAPDOS,   THUNDERBOLT, DRILL_PECK, THUNDER_WAVE, AGILITY
++	db MEW,      PSYCHIC_M,  RECOVER,    SWIFT,        REFLECT
++OakleConfigEnd::
++
++; Called once from OakleStart, after ResetWRAM.
++OakleSetup::
++	ld hl, OakleConfig + OAKLE_CFG_NAME
++	ld de, wPlayerName
++	ld bc, NAME_LENGTH
++	call CopyBytes
++
++	ld a, TEXT_DELAY_FAST ; fast text, battle animations on, SHIFT style
++	ld [wOptions], a
++
++	; seed the shared battle RNG (the link-battle list) so every player gets the same dice
++	ld hl, OakleConfig + OAKLE_CFG_RNG
++	ld de, wLinkBattleRNs
++	ld bc, SERIAL_RNS_LENGTH
++	call CopyBytes
++	xor a
++	ld [wLinkBattleRNCount], a
++	ld [wUnusedScriptByte], a ; turn counter
++
++	; party: 6 mons at Lv 100, max DVs and stat exp, moves straight from the config
++	xor a ; PARTYMON
++	ld [wMonType], a
++	ld hl, OakleConfig + OAKLE_CFG_PARTY
++	ld c, 6
++.partyLoop
++	push bc
++	push hl
++	ld a, [hl]
++	ld [wCurPartySpecies], a
++	ld a, 100
++	ld [wCurPartyLevel], a
++	call TryAddMonToParty
++	ld hl, wPartyMon1Species
++	ld a, [wPartyCount]
++	dec a
++	ld bc, PARTYMON_STRUCT_LENGTH
++	call AddNTimes ; hl = the mon we just added
++	push hl
++	ld bc, MON_DVS
++	add hl, bc
++	ld a, $ff
++	ld [hli], a
++	ld [hl], a
++	pop hl
++	push hl
++	ld bc, MON_STAT_EXP
++	add hl, bc
++	ld a, $ff
++	ld b, NUM_EXP_STATS * 2
++.expLoop
++	ld [hli], a
++	dec b
++	jr nz, .expLoop
++	pop hl ; struct
++	pop de ; config entry (species, moves...)
++	push de
++	inc de
++	push hl
++	ld bc, MON_MOVES
++	add hl, bc
++	ld b, NUM_MOVES
++.moveLoop
++	ld a, [de]
++	inc de
++	ld [hli], a
++	dec b
++	jr nz, .moveLoop
++	pop hl ; struct
++	push hl
++	ld bc, MON_PP
++	add hl, bc
++	ld d, h
++	ld e, l ; de = PP
++	pop hl
++	push hl
++	ld bc, MON_MOVES
++	add hl, bc
++	call FillPP
++	pop hl ; struct
++	push hl
++	ld bc, MON_MAXHP
++	add hl, bc
++	ld d, h
++	ld e, l ; de = stat destination
++	pop hl
++	push hl
++	ld bc, MON_STAT_EXP - 1
++	add hl, bc
++	ld b, TRUE ; use stat exp
++	call CalcMonStats
++	pop hl ; struct
++	push hl
++	ld bc, MON_MAXHP
++	add hl, bc
++	ld a, [hli]
++	ld d, a
++	ld e, [hl] ; max HP
++	pop hl
++	ld bc, MON_HP
++	add hl, bc
++	ld a, d
++	ld [hli], a
++	ld [hl], e ; current HP = max HP
++	pop hl ; config entry
++	ld bc, 5
++	add hl, bc
++	pop bc
++	dec c
++	jp nz, .partyLoop
++	ret
++
++; Elm's variant (his starter) from the config. Runs after loadtrainer in his script.
++OakleLoadElm::
++	ld a, [OakleConfig + OAKLE_CFG_TRAINER_NO]
++	ld [wOtherTrainerID], a
++	ret
++
++; Battle is over (wScriptVar = battle result: WIN, LOSE...). Record the result in SRAM bank 0 where the page looks for it.
++DEF OAKLE_SRAM_BANK EQU 0 ; nothing is mapped between $ac6b and $b1ff in bank 0
++DEF OAKLE_SRAM_ADDR EQU $b000 ; "OAKLE", result (1 win / 2 loss), turns, day lo, day hi, party mons still standing
++
++OakleFinish::
++	ld a, [wScriptVar]
++	and a ; WIN is 0
++	ld b, 1 ; win
++	jr z, .won
++	ld b, 2 ; loss
++.won
++	; d = how many of your Pokemon are still standing
++	ld hl, wPartyMon1HP
++	ld a, [wPartyCount]
++	ld e, a
++	ld d, 0
++.alive
++	ld a, [hli]
++	or [hl] ; HP high | low
++	jr z, .down
++	inc d
++.down
++	ld a, PARTYMON_STRUCT_LENGTH - 1
++	add l
++	ld l, a
++	jr nc, .nextMon
++	inc h
++.nextMon
++	dec e
++	jr nz, .alive
++	ld a, OAKLE_SRAM_BANK
++	call OpenSRAM
++	ld hl, OAKLE_SRAM_ADDR
++	ld a, $4f ; ASCII "OAKLE"
++	ld [hli], a
++	ld a, $41
++	ld [hli], a
++	ld a, $4b
++	ld [hli], a
++	ld a, $4c
++	ld [hli], a
++	ld a, $45
++	ld [hli], a
++	ld a, b
++	ld [hli], a
++	ld a, [wUnusedScriptByte]
++	ld [hli], a
++	ld a, [OakleConfig + OAKLE_CFG_DAY]
++	ld [hli], a
++	ld a, [OakleConfig + OAKLE_CFG_DAY + 1]
++	ld [hli], a
++	ld a, d
++	ld [hl], a
++	jp CloseSRAM
++
++; Never returns, so Elm cannot be fought twice.
++OakleHalt::
++.stop
++	halt
++	jr .stop
+diff -ruN -x elm.png pokecrystal-pristine/gfx/pics.asm src/gfx/pics.asm
+--- pokecrystal-pristine/gfx/pics.asm	2026-10-31 12:51:20
++++ src/gfx/pics.asm	2026-11-04 15:27:45
+@@ -473,7 +473,7 @@
+ SECTION "Pics 15", ROMX
+ 
+ MewtwoBackpic:       INCBIN "gfx/pokemon/mewtwo/back.2bpp.lz"
+-PokemonProfPic:      INCBIN "gfx/trainers/oak.2bpp.lz"
++PokemonProfPic:      INCBIN "gfx/trainers/elm.2bpp.lz" ; Oakle: Prof. Elm (rom/crystal/assets/elm.png); the game has no picture of him
+ CalPic:              INCBIN "gfx/trainers/cal.2bpp.lz"
+ SwimmerfPic:         INCBIN "gfx/trainers/swimmer_f.2bpp.lz"
+ DiglettFrontpic:     INCBIN "gfx/pokemon/diglett/front.animated.2bpp.lz"
+diff -ruN -x elm.png pokecrystal-pristine/main.asm src/main.asm
+--- pokecrystal-pristine/main.asm	2026-10-31 12:51:20
++++ src/main.asm	2026-11-04 14:43:01
+@@ -34,6 +34,7 @@
+ INCLUDE "engine/overworld/player_step.asm"
+ INCLUDE "engine/battle/anim_hp_bar.asm"
+ INCLUDE "engine/pokemon/move_mon.asm"
++INCLUDE "engine/oakle/oakle.asm"
+ INCLUDE "engine/pokemon/bills_pc_top.asm"
+ INCLUDE "engine/pokemon/breedmon_level_growth.asm"
+ INCLUDE "engine/events/bug_contest/caught_mon.asm"
+diff -ruN -x elm.png pokecrystal-pristine/maps/LancesRoom.asm src/maps/LancesRoom.asm
+--- pokecrystal-pristine/maps/LancesRoom.asm	2026-10-31 12:51:20
++++ src/maps/LancesRoom.asm	2026-11-04 16:02:02
+@@ -1,356 +1,100 @@
+ 	object_const_def
+-	const LANCESROOM_LANCE
+-	const LANCESROOM_MARY
+-	const LANCESROOM_OAK
++	const LANCESROOM_ELM
+ 
+ LancesRoom_MapScripts:
+ 	def_scene_scripts
+-	scene_script LancesRoomLockDoorScene, SCENE_LANCESROOM_LOCK_DOOR
+-	scene_script LancesRoomNoopScene,     SCENE_LANCESROOM_APPROACH_LANCE
++	scene_script LancesRoomIntroScene, SCENE_LANCESROOM_LOCK_DOOR ; the first scene: runs when the game starts
++	scene_script LancesRoomNoopScene,  SCENE_LANCESROOM_APPROACH_LANCE
+ 
+ 	def_callbacks
+-	callback MAPCALLBACK_TILES, LancesRoomDoorsCallback
+ 
+-LancesRoomLockDoorScene:
+-	sdefer LancesRoomDoorLocksBehindYouScript
++LancesRoomNoopScene:
+ 	end
+ 
+-LancesRoomNoopScene:
++; Oakle: Elm speaks the moment the game starts. Then the scene moves on, so reloading the map after the battle does not repeat it.
++LancesRoomIntroScene:
++	sdefer LancesRoomIntroScript
+ 	end
+ 
+-LancesRoomDoorsCallback:
+-	checkevent EVENT_LANCES_ROOM_ENTRANCE_CLOSED
+-	iffalse .KeepEntranceOpen
+-	changeblock 4, 22, $34 ; wall
+-.KeepEntranceOpen:
+-	checkevent EVENT_LANCES_ROOM_EXIT_OPEN
+-	iffalse .KeepExitClosed
+-	changeblock 4, 0, $0b ; open door
+-.KeepExitClosed:
+-	endcallback
+-
+-LancesRoomDoorLocksBehindYouScript:
+-	applymovement PLAYER, LancesRoom_EnterMovement
+-	reanchormap $86
+-	playsound SFX_STRENGTH
+-	earthquake 80
+-	changeblock 4, 22, $34 ; wall
+-	refreshmap
++LancesRoomIntroScript:
++	turnobject PLAYER, UP
++	opentext
++	writetext ElmPrepareText
++	waitbutton
+ 	closetext
+ 	setscene SCENE_LANCESROOM_APPROACH_LANCE
+-	setevent EVENT_LANCES_ROOM_ENTRANCE_CLOSED
+ 	end
+ 
+-Script_ApproachLanceFromLeft:
+-	special FadeOutMusic
+-	applymovement PLAYER, MovementData_ApproachLanceFromLeft
+-	sjump LancesRoomLanceScript
+-
+-Script_ApproachLanceFromRight:
+-	special FadeOutMusic
+-	applymovement PLAYER, MovementData_ApproachLanceFromRight
+-LancesRoomLanceScript:
+-	turnobject LANCESROOM_LANCE, LEFT
++; Oakle: no way out. The doors to Karen's room and the Hall of Fame are gone, so the room is the whole game.
++; Open START > #MON to set your order, then talk to ELM: one line of good luck and the battle starts.
++LancesRoomElmScript:
++	faceplayer
+ 	opentext
+-	writetext LanceBattleIntroText
++	writetext ElmGoodLuckText
+ 	waitbutton
+ 	closetext
+-	winlosstext LanceBattleWinText, 0
+-	setlasttalked LANCESROOM_LANCE
+-	loadtrainer CHAMPION, LANCE
++	winlosstext ElmDefeatedText, ElmVictoryText
++	setlasttalked LANCESROOM_ELM
++	loadtrainer POKEMON_PROF, ELM1
++	callasm OakleLoadElm
+ 	startbattle
+-	dontrestartmapmusic
+-	reloadmapafterbattle
+-	setevent EVENT_BEAT_CHAMPION_LANCE
++	callasm OakleFinish
++	reloadmap ; not reloadmapafterbattle: that would black out on a loss
++	ifequal LOSE, .Lost
++	sjump .Over
++.Lost:
+ 	opentext
+-	writetext LanceBattleAfterText
++	writetext ElmVictoryText
+ 	waitbutton
+ 	closetext
+-	playsound SFX_ENTER_DOOR
+-	changeblock 4, 0, $0b ; open door
+-	refreshmap
+-	closetext
+-	setevent EVENT_LANCES_ROOM_ENTRANCE_CLOSED
+-	musicfadeout MUSIC_BEAUTY_ENCOUNTER, 16
+-	pause 30
+-	showemote EMOTE_SHOCK, LANCESROOM_LANCE, 15
+-	turnobject LANCESROOM_LANCE, DOWN
+-	pause 10
+-	turnobject PLAYER, DOWN
+-	appear LANCESROOM_MARY
+-	applymovement LANCESROOM_MARY, LancesRoomMovementData_MaryRushesIn
++.Over:
+ 	opentext
+-	writetext LancesRoomMaryOhNoOakText
+-	waitbutton
+-	closetext
+-	appear LANCESROOM_OAK
+-	applymovement LANCESROOM_OAK, LancesRoomMovementData_OakWalksIn
+-	follow LANCESROOM_MARY, LANCESROOM_OAK
+-	applymovement LANCESROOM_MARY, LancesRoomMovementData_MaryYieldsToOak
+-	stopfollow
+-	turnobject LANCESROOM_OAK, UP
+-	turnobject LANCESROOM_LANCE, LEFT
+-	opentext
+-	writetext LancesRoomOakCongratulationsText
+-	waitbutton
+-	closetext
+-	applymovement LANCESROOM_MARY, LancesRoomMovementData_MaryInterviewChampion
+-	turnobject PLAYER, LEFT
+-	opentext
+-	writetext LancesRoomMaryInterviewText
+-	waitbutton
+-	closetext
+-	applymovement LANCESROOM_LANCE, LancesRoomMovementData_LancePositionsSelfToGuidePlayerAway
+-	turnobject PLAYER, UP
+-	opentext
+-	writetext LancesRoomNoisyText
+-	waitbutton
+-	closetext
+-	follow LANCESROOM_LANCE, PLAYER
+-	turnobject LANCESROOM_MARY, UP
+-	turnobject LANCESROOM_OAK, UP
+-	applymovement LANCESROOM_LANCE, LancesRoomMovementData_LanceLeadsPlayerToHallOfFame
+-	stopfollow
+-	playsound SFX_EXIT_BUILDING
+-	disappear LANCESROOM_LANCE
+-	applymovement PLAYER, LancesRoomMovementData_PlayerExits
+-	playsound SFX_EXIT_BUILDING
+-	disappear PLAYER
+-	applymovement LANCESROOM_MARY, LancesRoomMovementData_MaryTriesToFollow
+-	showemote EMOTE_SHOCK, LANCESROOM_MARY, 15
+-	opentext
+-	writetext LancesRoomMaryNoInterviewText
+-	pause 30
+-	closetext
+-	applymovement LANCESROOM_MARY, LancesRoomMovementData_MaryRunsBackAndForth
+-	special FadeOutToWhite
+-	pause 15
+-	warpfacing UP, HALL_OF_FAME, 4, 13
++	writetext OakleDoneText ; stays on screen: nothing closes it, and OakleHalt never returns
++	callasm OakleHalt
+ 	end
+ 
+-LancesRoom_EnterMovement:
+-	step UP
+-	step UP
+-	step UP
+-	step UP
+-	step_end
++ElmPrepareText:
++	text "ELM: <PLAYER>!"
++	line "Prepare your team"
++	cont "to battle me!"
+ 
+-MovementData_ApproachLanceFromLeft:
+-	step UP
+-	step UP
+-	turn_head RIGHT
+-	step_end
+-
+-MovementData_ApproachLanceFromRight:
+-	step UP
+-	step LEFT
+-	step UP
+-	turn_head RIGHT
+-	step_end
+-
+-LancesRoomMovementData_MaryRushesIn:
+-	big_step UP
+-	big_step UP
+-	big_step UP
+-	turn_head DOWN
+-	step_end
+-
+-LancesRoomMovementData_OakWalksIn:
+-	step UP
+-	step UP
+-	step_end
+-
+-LancesRoomMovementData_MaryYieldsToOak:
+-	step LEFT
+-	turn_head RIGHT
+-	step_end
+-
+-LancesRoomMovementData_MaryInterviewChampion:
+-	big_step UP
+-	turn_head RIGHT
+-	step_end
+-
+-LancesRoomMovementData_LancePositionsSelfToGuidePlayerAway:
+-	step UP
+-	step LEFT
+-	turn_head DOWN
+-	step_end
+-
+-LancesRoomMovementData_LanceLeadsPlayerToHallOfFame:
+-	step UP
+-	step_end
+-
+-LancesRoomMovementData_PlayerExits:
+-	step UP
+-	step_end
+-
+-LancesRoomMovementData_MaryTriesToFollow:
+-	step UP
+-	step RIGHT
+-	turn_head UP
+-	step_end
+-
+-LancesRoomMovementData_MaryRunsBackAndForth:
+-	big_step RIGHT
+-	big_step RIGHT
+-	big_step LEFT
+-	big_step LEFT
+-	big_step LEFT
+-	big_step RIGHT
+-	big_step RIGHT
+-	big_step RIGHT
+-	big_step LEFT
+-	big_step LEFT
+-	turn_head UP
+-	step_end
+-
+-LanceBattleIntroText:
+-	text "LANCE: I've been"
+-	line "waiting for you."
+-
+-	para "<PLAY_G>!"
+-
+-	para "I knew that you,"
+-	line "with your skills,"
+-
+-	para "would eventually"
+-	line "reach me here."
+-
+-	para "There's no need"
+-	line "for words now."
+-
+-	para "We will battle to"
+-	line "determine who is"
+-
+-	para "the stronger of"
+-	line "the two of us."
+-
+-	para "As the most power-"
+-	line "ful trainer and as"
+-
+-	para "the #MON LEAGUE"
+-	line "CHAMPION…"
+-
+-	para "I, LANCE the drag-"
+-	line "on master, accept"
+-	cont "your challenge!"
++	para "Talk to me when"
++	line "you are ready."
+ 	done
+ 
+-LanceBattleWinText:
+-	text "…It's over."
+-
+-	para "But it's an odd"
+-	line "feeling."
+-
+-	para "I'm not angry that"
+-	line "I lost. In fact, I"
+-	cont "feel happy."
+-
+-	para "Happy that I"
+-	line "witnessed the rise"
+-
+-	para "of a great new"
+-	line "CHAMPION!"
++ElmGoodLuckText:
++	text "ELM: Good luck,"
++	line "<PLAYER>!"
+ 	done
+ 
+-LanceBattleAfterText:
+-	text "…Whew."
+-
+-	para "You have become"
+-	line "truly powerful,"
+-	cont "<PLAY_G>."
+-
+-	para "Your #MON have"
+-	line "responded to your"
+-
+-	para "strong and up-"
+-	line "standing nature."
+-
+-	para "As a trainer, you"
+-	line "will continue to"
+-
+-	para "grow strong with"
+-	line "your #MON."
++ElmDefeatedText:
++	text "ELM: Wonderful!"
++	line "Well played,"
++	cont "<PLAYER>!"
+ 	done
+ 
+-LancesRoomMaryOhNoOakText:
+-	text "MARY: Oh, no!"
+-	line "It's all over!"
+-
+-	para "PROF.OAK, if you"
+-	line "weren't so slow…"
++ElmVictoryText:
++	text "ELM: Not yet!"
++	line "Try again"
++	cont "tomorrow."
+ 	done
+ 
+-LancesRoomOakCongratulationsText:
+-	text "PROF.OAK: Ah,"
+-	line "<PLAY_G>!"
++OakleDoneText:
++	text "Today's battle"
++	line "is over."
+ 
+-	para "It's been a long"
+-	line "while."
+-
+-	para "You certainly look"
+-	line "more impressive."
+-
+-	para "Your conquest of"
+-	line "the LEAGUE is just"
+-	cont "fantastic!"
+-
+-	para "Your dedication,"
+-	line "trust and love for"
+-
+-	para "your #MON made"
+-	line "this happen."
+-
+-	para "Your #MON were"
+-	line "outstanding too."
+-
+-	para "Because they be-"
+-	line "lieved in you as a"
+-
+-	para "trainer, they per-"
+-	line "severed."
+-
+-	para "Congratulations,"
+-	line "<PLAY_G>!"
++	para "Come back"
++	line "tomorrow!"
+ 	done
+ 
+-LancesRoomMaryInterviewText:
+-	text "MARY: Let's inter-"
+-	line "view the brand new"
+-	cont "CHAMPION!"
+-	done
+-
+-LancesRoomNoisyText:
+-	text "LANCE: This is"
+-	line "getting to be a"
+-	cont "bit too noisy…"
+-
+-	para "<PLAY_G>, could you"
+-	line "come with me?"
+-	done
+-
+-LancesRoomMaryNoInterviewText:
+-	text "MARY: Oh, wait!"
+-	line "We haven't done"
+-	cont "the interview!"
+-	done
+-
+ LancesRoom_MapEvents:
+ 	db 0, 0 ; filler
+ 
+ 	def_warp_events
+-	warp_event  4, 23, KARENS_ROOM, 3
+-	warp_event  5, 23, KARENS_ROOM, 4
+-	warp_event  4,  1, HALL_OF_FAME, 1
+-	warp_event  5,  1, HALL_OF_FAME, 2
+ 
+ 	def_coord_events
+-	coord_event  4,  5, SCENE_LANCESROOM_APPROACH_LANCE, Script_ApproachLanceFromLeft
+-	coord_event  5,  5, SCENE_LANCESROOM_APPROACH_LANCE, Script_ApproachLanceFromRight
+ 
+ 	def_bg_events
+ 
+ 	def_object_events
+-	object_event  5,  3, SPRITE_LANCE, SPRITEMOVEDATA_STANDING_DOWN, 0, 0, -1, -1, 0, OBJECTTYPE_SCRIPT, 0, LancesRoomLanceScript, -1
+-	object_event  4,  7, SPRITE_TEACHER, SPRITEMOVEDATA_STANDING_UP, 0, 0, -1, -1, PAL_NPC_GREEN, OBJECTTYPE_SCRIPT, 0, ObjectEvent, EVENT_LANCES_ROOM_OAK_AND_MARY
+-	object_event  4,  7, SPRITE_OAK, SPRITEMOVEDATA_STANDING_UP, 0, 0, -1, -1, 0, OBJECTTYPE_SCRIPT, 0, ObjectEvent, EVENT_LANCES_ROOM_OAK_AND_MARY
++	object_event  5,  3, SPRITE_ELM, SPRITEMOVEDATA_STANDING_DOWN, 0, 0, -1, -1, 0, OBJECTTYPE_SCRIPT, 0, LancesRoomElmScript, -1
