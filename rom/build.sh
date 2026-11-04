@@ -22,6 +22,7 @@ if [ ! -d pokeyellow-pristine ]; then
   curl -fsSL "https://github.com/pret/pokeyellow/archive/$SHA.tar.gz" | tar -xz
   mv "pokeyellow-$SHA" pokeyellow-pristine
 fi
+[ -z "$FETCH_ONLY" ] || { echo "fetched pokeyellow-pristine"; exit 0; } # CI: the day data only needs the decomp's constants
 if [ ! -d src ]; then
   cp -R pokeyellow-pristine src
   patch -s -d src -p1 < patches/oakle.patch

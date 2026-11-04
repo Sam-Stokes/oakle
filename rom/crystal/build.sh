@@ -23,6 +23,7 @@ if [ ! -d pokecrystal-pristine ]; then
   curl -fsSL "https://github.com/pret/pokecrystal/archive/$SHA.tar.gz" | tar -xz
   mv "pokecrystal-$SHA" pokecrystal-pristine
 fi
+[ -z "$FETCH_ONLY" ] || { echo "fetched pokecrystal-pristine"; exit 0; } # CI: the day data only needs the decomp's constants
 if [ ! -d src ]; then
   cp -R pokecrystal-pristine src
   [ ! -f patches/oakle-crystal.patch ] || patch -s -d src -p1 < patches/oakle-crystal.patch
