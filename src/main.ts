@@ -285,7 +285,7 @@ function buildShell() {
     <nav class="games" aria-label="Games">${tabs}<a class="gall" href="/?pick">All games</a></nav>
     <header class="top">
       <div class="title">
-        <h1>OAKLE <span>#${day}</span>${G.id !== "yellow" ? `<em class="badge">${esc(G.title.replace("Pokémon ", "").toUpperCase())}</em>` : ""}${archive ? '<em class="badge">ARCHIVE</em>' : ""}</h1>
+        <h1>OAKLE <span>#${day}</span><em class="badge">${esc(G.title.replace("Pokémon ", "").toUpperCase())}</em>${archive ? '<em class="badge">ARCHIVE</em>' : ""}</h1>
         <p>${esc(dateOf(day))}. ${archive ? `<a href="${TEST ? "?test" : G.path}">Back to today (#${current})</a>` : `Beat ${esc(G.bossFull.replace("Prof.", "Professor"))}. One try a day.`}</p>
         <p class="live" id="live"></p>
       </div>
