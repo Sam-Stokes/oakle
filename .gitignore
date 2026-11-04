@@ -39,3 +39,5 @@ public/og.png
 /.claude
 .DS_Store
 *.log
+/.agents
+/.codex

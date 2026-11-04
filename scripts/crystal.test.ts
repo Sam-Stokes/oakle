@@ -80,7 +80,8 @@ describe('Crystal', () => {
     const t = await setup();
     await t.play('b', 'MISTY', true, 9, 6, CDAY, crystal()); // #1, so ASH's win is announced as a plain "beat Elm" with a rank
     await t.play('a', 'ASH', true, 15, 3, CDAY, crystal({sq: '321000'}));
-    expect(t.text('')).toEqual(expect.arrayContaining([expect.stringContaining('ASH** beat Elm in 15 turns, 3 left. #2 today')]));
+    expect(t.text('')).toEqual(expect.arrayContaining([expect.stringContaining('ASH** beat Elm in 15 turns, 3 left. #2 today on Oakle Crystal')]));
+    expect(t.text('')).toEqual(expect.arrayContaining([expect.stringContaining('MISTY** takes #1 today on Oakle Crystal: 9 turns, 6 left')]));
     expect(t.results().join('\n')).toContain('Oakle Crystal #3 — ASH beat Elm in 15 turns\n🟩🟨🟥⬛⬛⬛');
   });
 
