@@ -84,8 +84,9 @@ declare const HTMLRewriter: any; // Workers runtime global (no @cloudflare/worke
 
 type Env = {DB: any; ASSETS: {fetch: typeof fetch}; FLOOD?: {limit(o: {key: string}): Promise<{success: boolean}>}; VERIFY?: string; GITHUB_TOKEN?: string; GITHUB_REPO?: string; DISCORD_WEBHOOK?: string; DISCORD_RESULTS_WEBHOOK?: string; DISCORD_CLIENT_ID?: string; DISCORD_CLIENT_SECRET?: string; DISCORD_GUILD_ID?: string; BSKY_HANDLE?: string; BSKY_APP_PASSWORD?: string};
 type Ctx = {waitUntil(p: Promise<unknown>): void};
-// Yellow's posts keep their wording; Crystal's say which game, because both games post to the same channel
-const WHEN = (g: Game, day: number, current: number) => day === current ? (g.id === 'yellow' ? 'today' : `today on ${gameLabel(g)}`) : `on ${gameLabel(g)} #${day}`;
+// Both games post to the same channel, so every "when" says which game: "today on Oakle Yellow", "on Oakle Crystal #3"
+const feedName = (g: Game) => `Oakle ${g.title.replace('Pokémon ', '')}`;
+const WHEN = (g: Game, day: number, current: number) => day === current ? `today on ${feedName(g)}` : `on ${feedName(g)} #${day}`;
 
 /** Discord note for a win: where it lands on that day's board. Called after the run is saved. */
 async function announceWin(db: any, env: Env, g: Game, id: string, day: number, v: {turns: number; alive: number}, current: number) {

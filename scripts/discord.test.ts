@@ -61,14 +61,14 @@ describe('Worker hooks', () => {
     await t.play('a', 'ASH', true, 10, 3);
     await t.play('b', 'MISTY', true, 20, 2);
     expect(t.sent.every(m => m.allowed_mentions.parse.length === 0)).toBe(true);
-    expect(t.text('🥇')).toEqual(['🥇 **ASH** takes #1 today: 10 turns, 3 left']);
-    expect(t.text('**MISTY**')).toEqual(['**MISTY** beat Oak in 20 turns, 2 left. #2 today']);
+    expect(t.text('🥇')).toEqual(['🥇 **ASH** takes #1 today on Oakle Yellow: 10 turns, 3 left']);
+    expect(t.text('**MISTY**')).toEqual(['**MISTY** beat Oak in 20 turns, 2 left. #2 today on Oakle Yellow']);
   });
   it('an archive win names the day, and a loss says nothing', async () => {
     const t = await setup();
     await t.play('a', 'ASH', true, 9, 1, TODAY - 1);
     await t.play('b', 'BROCK', false, 7, 0);
-    expect(t.text('🥇')).toEqual([`🥇 **ASH** takes #1 on Oakle #${TODAY - 1}: 9 turns, 1 left`]);
+    expect(t.text('🥇')).toEqual([`🥇 **ASH** takes #1 on Oakle Yellow #${TODAY - 1}: 9 turns, 1 left`]);
     expect(t.text('')).toHaveLength(3); // the feed: 2 new trainers + 1 win
   });
   it('a finished battle is posted to the results channel as the share card, win or loss', async () => {

@@ -117,7 +117,7 @@ describe('Discord link', () => {
     const t = await setup(ENV, undefined, discord());
     await link(t, 'a', 'ASH');
     await t.play('a', 'ASH', true, 10, 3, TODAY, {sq: '32100'});
-    expect(t.text('🥇')).toEqual([`🥇 **ASH** (<@${DID}>) takes #1 today: 10 turns, 3 left`]);
+    expect(t.text('🥇')).toEqual([`🥇 **ASH** (<@${DID}>) takes #1 today on Oakle Yellow: 10 turns, 3 left`]);
     expect(t.results()).toEqual([`<@${DID}>\n` + box('Oakle #5 — ASH beat Oak in 10 turns\n🟩🟨🟥⬛⬛')]);
     expect(t.sent.every(m => m.allowed_mentions.parse.length === 0)).toBe(true);
   });
@@ -127,7 +127,7 @@ describe('Discord link', () => {
     await link(t, 'a', 'ASH');
     expect(await (await t.call(`/api/me?id=${id('a')}`)).json()).toMatchObject({discord: {member: false}});
     await t.play('a', 'ASH', true, 10, 3, TODAY, {sq: '32100'});
-    expect(t.text('🥇')).toEqual(['🥇 **ASH** takes #1 today: 10 turns, 3 left']);
+    expect(t.text('🥇')).toEqual(['🥇 **ASH** takes #1 today on Oakle Yellow: 10 turns, 3 left']);
     expect(t.results()).toEqual([box('Oakle #5 — ASH beat Oak in 10 turns\n🟩🟨🟥⬛⬛')]);
   });
 

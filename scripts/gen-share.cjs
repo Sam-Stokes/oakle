@@ -69,10 +69,11 @@ const text = (c, s, x, y, scale, col) => {
   if (!fs.existsSync(ROM)) { console.log('gen-share: no ROM yet, skipping (run npm run rom first)'); return; }
   const emu = await boot(fs.readFileSync(ROM));
   emu.run(500);
-  // walk the intro exactly like a player: dismiss Oak's line, step next to him, talk, then watch the battle intro
-  for (let i = 0; i < 16; i++) emu.press('a', 6, 70);
-  emu.press('left', 14, 40); emu.press('up', 8, 30); emu.press('a', 6, 120);
-  emu.press('a', 4, 10);
+  // play the start exactly like a player: Oak's opening text (three presses), talk to him (he is right in front of you),
+  // his one line, then watch the battle intro
+  for (let i = 0; i < 3; i++) emu.press('a', 6, 70);
+  emu.press('a', 6, 120); // talk
+  emu.press('a', 4, 10);  // his line away: the battle begins
 
   // wait for Oak's trainer pic to finish sliding in: the top-right region fills up and then stops changing
   const REGION_H = 60; // above the player's HUD
