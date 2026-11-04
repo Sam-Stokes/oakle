@@ -1,6 +1,7 @@
 import "./style.css";
 import { dayNumber, dayStart, TZ } from "./day";
 import { Emu, loadBinjgb, type Button } from "./emu";
+import { GAME_IDS, GAMES, type Game } from "./games";
 import {
   dayId,
   encodeLog,
@@ -9,7 +10,8 @@ import {
   romId,
   type Day as RomDay,
 } from "./rom";
-import { bands, shareText, type Party } from "./share";
+import { bands, gameLabel, shareText, type Party } from "./share";
+import { gameKey, ID_KEY, loadTrainer } from "./trainer";
 
 // Permanent invite (never expires, unlimited uses) that lands on #welcome. Checked 2026-10-15.
 const DISCORD = "https://discord.gg/m8M94k6NbZ";
@@ -42,21 +44,41 @@ type Save = { id: string; name: string; runs: Record<number, Run> };
 const Q = new URLSearchParams(location.search);
 const LOCAL = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname); // never honoured on the deployed site
 const TEST = LOCAL && Q.has("test");
-const KEY = TEST ? "oakle-test" : "oakle";
+// Which game this page is: /crystal is Crystal, anything else Yellow (localhost can pick with ?game=crystal).
+const G: Game =
+  location.pathname.startsWith("/crystal") ||
+  (LOCAL && Q.get("game") === "crystal")
+    ? GAMES.crystal
+    : GAMES.yellow;
+// One trainer (id + name) for both games; each game keeps its own runs (src/trainer.ts).
+const KEY = TEST ? "oakle-test" : gameKey(G.id);
+const ID_KEY_ = TEST ? "" : ID_KEY;
 const hex = () =>
   [...crypto.getRandomValues(new Uint8Array(16))]
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
-let save: Save;
-try {
-  save = JSON.parse(localStorage.getItem(KEY) || "");
-  save.runs ||= {};
-} catch {
-  save = { id: hex(), name: "", runs: {} };
-}
+const read = (k: string): Partial<Save> => {
+  try {
+    return JSON.parse(localStorage.getItem(k) || "") ?? {};
+  } catch {
+    return {};
+  }
+};
+let save: Save = TEST
+  ? {
+      id: read(KEY).id || hex(),
+      name: read(KEY).name ?? "",
+      runs: read(KEY).runs ?? {},
+    }
+  : loadTrainer(read, G.id, hex);
 const persist = () => {
   try {
     localStorage.setItem(KEY, JSON.stringify(save));
+    if (ID_KEY_)
+      localStorage.setItem(
+        ID_KEY_,
+        JSON.stringify({ id: save.id, name: save.name }),
+      );
   } catch {
     /* private mode: play without saving */
   }
@@ -67,6 +89,23 @@ try {
 } catch {
   /* default: sound on */
 }
+
+// "Crystal is here" banner on Yellow's page: gone for good once it is closed or Crystal has been opened.
+const NEWS_KEY = "oakle-news-crystal";
+const newsSeen = () => {
+  try {
+    return !!localStorage.getItem(NEWS_KEY);
+  } catch {
+    return false;
+  }
+};
+const markNews = () => {
+  try {
+    localStorage.setItem(NEWS_KEY, "1");
+  } catch {
+    /* storage blocked: it shows again next visit */
+  }
+};
 
 const app = document.getElementById("app")!;
 const $ = <T extends HTMLElement>(s: string) => document.querySelector<T>(s)!;
@@ -86,10 +125,17 @@ const api = async (path: string, body?: unknown) => {
         runs: [],
       },
     };
-  const r = await fetch("/api/" + path, {
-    redirect: "manual",
-    ...(body ? { method: "POST", body: JSON.stringify(body) } : {}),
-  });
+  const r = await fetch(
+    "/api/" +
+      path +
+      (body ? "" : (path.includes("?") ? "&" : "?") + "game=" + G.id),
+    {
+      redirect: "manual",
+      ...(body
+        ? { method: "POST", body: JSON.stringify({ ...body, game: G.id }) }
+        : {}),
+    },
+  );
   if (r.type === "opaqueredirect") throw new Error("signin"); // Cloudflare Access wants a login first
   return { status: r.status, data: await r.json().catch(() => ({}) as any) };
 };
@@ -125,7 +171,8 @@ const NAME_ERR = {
 };
 
 // ---- save states (reload resumes the same battle instead of rerolling it)
-const stateKey = (d: number) => `state-${TEST ? "t" : ""}${d}`;
+const stateKey = (d: number) =>
+  `state-${G.id === "yellow" ? "" : G.id + "-"}${TEST ? "t" : ""}${d}`;
 const idb = () =>
   new Promise<IDBDatabase>((res, rej) => {
     const r = indexedDB.open("oakle", 1);
@@ -133,7 +180,13 @@ const idb = () =>
     r.onsuccess = () => res(r.result);
     r.onerror = () => rej(r.error);
   });
-type Saved = { state: Uint8Array; log: number[]; name: string; rom: string; cfg?: string }; // a save state with the input log, name and day data (dayId) that produced it
+type Saved = {
+  state: Uint8Array;
+  log: number[];
+  name: string;
+  rom: string;
+  cfg?: string;
+}; // a save state with the input log, name and day data (dayId) that produced it
 const idbGet = async (k: string) => {
   const db = await idb();
   return new Promise<Saved | undefined>((res) => {
@@ -156,8 +209,8 @@ const idbSet = async (k: string, v: Saved) => {
 let assets: Promise<[ArrayBuffer, { config: number }]> | null = null;
 const loadAssets = () =>
   (assets ??= Promise.all([
-    fetch("/rom/oakle.gbc").then((r) => r.arrayBuffer()),
-    fetch("/rom/oakle.json").then((r) => r.json()),
+    fetch(G.rom).then((r) => r.arrayBuffer()),
+    fetch(G.romMeta).then((r) => r.json()),
   ]));
 let prepared: Promise<Emu> | null = null;
 // every emulator gets its own fresh module (loadBinjgb), never one that already ran a game
@@ -166,7 +219,7 @@ const prepare = (warm = true) =>
     async ([mod, [rom, meta]]) => {
       const e = new Emu(
         mod,
-        patchRom(new Uint8Array(rom), meta.config, today, save.name),
+        patchRom(new Uint8Array(rom), meta.config, today, save.name, G),
         $<HTMLCanvasElement>("#screen"),
       );
       e.romName = save.name;
@@ -202,8 +255,8 @@ let day = 0,
   today: Day,
   emu: Emu | null = null;
 
-const dateOf = (n: number) =>
-  new Date(dayStart(n) + 12 * 3600e3).toLocaleDateString(undefined, {
+const dateOf = (n: number, g: Game = G) =>
+  new Date(dayStart(n, g.launch) + 12 * 3600e3).toLocaleDateString(undefined, {
     weekday: "long",
     day: "numeric",
     month: "long",
@@ -213,11 +266,27 @@ const dateOf = (n: number) =>
 function buildShell() {
   const kbd = (k: string, what: string) =>
     `<span><kbd>${k}</kbd>${what}</span>`;
-  app.innerHTML = `
+  const tabs = GAME_IDS.map((id) => GAMES[id])
+    .map(
+      (g) =>
+        `<a class="gtab" href="${g.path}"${g.id === G.id ? ' aria-current="page"' : ""}>${esc(g.title.replace("Pokémon ", ""))}<small>Gen ${g.gen}</small></a>`,
+    )
+    .join("");
+  const crystalOpen = dayNumber(new Date(), GAMES.crystal.launch) >= 1;
+  const banner =
+    G.id === "yellow" && !TEST && !newsSeen()
+      ? `<aside class="news" role="status">
+      <p><b>${crystalOpen ? "NEW" : "SOON"}</b>${crystalOpen ? "Pokémon Crystal is out! Six random Pokémon against Professor Elm, one try a day." : `Pokémon Crystal opens ${esc(dateOf(1, GAMES.crystal))}. Six random Pokémon against Professor Elm.`}</p>
+      <a class="news-go" id="newsgo" href="${GAMES.crystal.path}">${crystalOpen ? "PLAY CRYSTAL" : "SEE CRYSTAL"}</a>
+      <button class="news-x" id="newsx" aria-label="Dismiss">×</button>
+    </aside>`
+      : "";
+  app.innerHTML = `${banner}
+    <nav class="games" aria-label="Games">${tabs}<a class="gall" href="/?pick">All games</a></nav>
     <header class="top">
       <div class="title">
-        <h1>OAKLE <span>#${day}</span>${archive ? '<em class="badge">ARCHIVE</em>' : ""}</h1>
-        <p>${esc(dateOf(day))}. ${archive ? `<a href="${TEST ? "?test" : "./"}">Back to today (#${current})</a>` : "Beat Professor Oak. One try a day."}</p>
+        <h1>OAKLE <span>#${day}</span>${G.id !== "yellow" ? `<em class="badge">${esc(G.title.replace("Pokémon ", "").toUpperCase())}</em>` : ""}${archive ? '<em class="badge">ARCHIVE</em>' : ""}</h1>
+        <p>${esc(dateOf(day))}. ${archive ? `<a href="${TEST ? "?test" : G.path}">Back to today (#${current})</a>` : `Beat ${esc(G.bossFull.replace("Prof.", "Professor"))}. One try a day.`}</p>
         <p class="live" id="live"></p>
       </div>
       <div class="tools">
@@ -336,7 +405,7 @@ const renderTeam = () => {
     el.dataset.init = "1";
   } // open to start with; after that it stays as the player left it
   const picture = (i: number) =>
-    `<img class="sprite" src="/sprites/${today.party[i]?.[0]}.png" alt="" width="56" height="56">`;
+    `<img class="sprite" src="${G.sprites}${today.party[i]?.[0]}.png" alt="" width="56" height="56">`;
   el.innerHTML = `<summary><span>${archive ? `Team for #${day}` : "Your team today"}</span></summary>
     <div class="team-list">${today.team.map((m, i) => `<div class="mon">${picture(i)}<b><i>${i + 1}</i>${esc(m.species)}</b><ul>${m.moves.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>`).join("")}</div>`;
   // the pictures are fetched at build time; when one is missing the row just shows without it
@@ -345,40 +414,72 @@ const renderTeam = () => {
   );
 };
 
-// Prof. Oak's team: mirrors ProfOakData + special_moves in rom/patches/oakle.patch (all Lv 100). Only slot 4, the
-// starter, changes with the day (trainer 1..3), so it is shown as a mystery. `id` is the ROM's internal species id.
-const OAK: { id: number; name: string; moves: string[] }[] = [
-  {
-    id: 60,
-    name: "Tauros",
-    moves: ["Body Slam", "Hyper Beam", "Earthquake", "Blizzard"],
-  },
-  {
-    id: 10,
-    name: "Exeggutor",
-    moves: ["Psychic", "Hypnosis", "Explosion", "Double-Edge"],
-  },
-  {
-    id: 20,
-    name: "Arcanine",
-    moves: ["Fire Blast", "Body Slam", "Hyper Beam", "Reflect"],
-  },
-  { id: 0, name: "???", moves: ["Venusaur, Charizard", "or Blastoise"] },
-  {
-    id: 22,
-    name: "Gyarados",
-    moves: ["Hydro Pump", "Blizzard", "Thunderbolt", "Body Slam"],
-  },
-];
+// The boss's team: mirrors ProfOakData + special_moves in rom/patches/oakle.patch (Yellow) and PokemonProfGroup in
+// rom/crystal/patches/oakle-crystal.patch (Crystal), all Lv 100. Only the starter slot changes with the day (trainer 1..3),
+// so it is shown as a mystery. `id` is the picture's number: the ROM's internal species id in Yellow, the Pokedex number in Crystal.
+type BossMon = { id: number; name: string; moves: string[] };
+const BOSS: Record<Game["id"], BossMon[]> = {
+  yellow: [
+    {
+      id: 60,
+      name: "Tauros",
+      moves: ["Body Slam", "Hyper Beam", "Earthquake", "Blizzard"],
+    },
+    {
+      id: 10,
+      name: "Exeggutor",
+      moves: ["Psychic", "Hypnosis", "Explosion", "Double-Edge"],
+    },
+    {
+      id: 20,
+      name: "Arcanine",
+      moves: ["Fire Blast", "Body Slam", "Hyper Beam", "Reflect"],
+    },
+    { id: 0, name: "???", moves: ["Venusaur, Charizard", "or Blastoise"] },
+    {
+      id: 22,
+      name: "Gyarados",
+      moves: ["Hydro Pump", "Blizzard", "Thunderbolt", "Body Slam"],
+    },
+  ],
+  crystal: [
+    {
+      id: 196,
+      name: "Espeon",
+      moves: ["Psychic", "Shadow Ball", "Swift", "Iron Tail"],
+    },
+    {
+      id: 181,
+      name: "Ampharos",
+      moves: ["Thunder", "Fire Punch", "Thunder Wave", "Light Screen"],
+    },
+    {
+      id: 176,
+      name: "Togetic",
+      moves: ["Fly", "Psychic", "Flamethrower", "Double-Edge"],
+    },
+    { id: 0, name: "???", moves: ["Meganium, Typhlosion", "or Feraligatr"] },
+    {
+      id: 208,
+      name: "Steelix",
+      moves: ["Earthquake", "Crunch", "Iron Tail", "Sandstorm"],
+    },
+    {
+      id: 248,
+      name: "Tyranitar",
+      moves: ["Crunch", "Rock Slide", "Earthquake", "Fire Blast"],
+    },
+  ],
+};
 function renderOak() {
   const el = $<HTMLDetailsElement>("#oak");
   if (!el.dataset.init) {
-    el.open = matchMedia("(min-width: 1180px)").matches;
+    el.open = matchMedia("(max-width: 919px), (min-width: 1180px)").matches;
     el.dataset.init = "1";
   } // open where there is room
-  el.innerHTML = `<summary><span>Prof. Oak's team</span></summary>
+  el.innerHTML = `<summary><span>${esc(G.bossFull)}'s team</span></summary>
     <p class="muted">His team never changes, only his starter does.</p>
-    <div class="team-list oak-list">${OAK.map((m, i) => `<div class="mon">${m.id ? `<img class="sprite" src="/sprites/${m.id}.png" alt="" width="56" height="56">` : '<span class="sprite q" aria-hidden="true">?</span>'}<b><i>${i + 1}</i>${esc(m.name)}</b><ul>${m.moves.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>`).join("")}</div>`;
+    <div class="team-list oak-list">${BOSS[G.id].map((m, i) => `<div class="mon">${m.id ? `<img class="sprite" src="${G.sprites}${m.id}.png" alt="" width="56" height="56">` : '<span class="sprite q" aria-hidden="true">?</span>'}<b><i>${i + 1}</i>${esc(m.name)}</b><ul>${m.moves.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>`).join("")}</div>`;
   el.querySelectorAll<HTMLImageElement>(".sprite").forEach((img) =>
     img.addEventListener("error", () => img.remove()),
   );
@@ -386,10 +487,10 @@ function renderOak() {
 
 function renderHow() {
   const d = $<HTMLDetailsElement>("#how");
-  d.open = !save.name;
+  d.open = !save.name || matchMedia("(max-width: 919px)").matches; // new players, and everyone on mobile
   d.innerHTML = `<summary>How it works</summary>
     <ul class="how-list">
-      <li>Talk to Prof. Oak when you are ready. Before that you can reorder your team with START, then POKEMON.</li>
+      <li>Talk to ${esc(G.bossFull)} when you are ready. Before that you can reorder your team with START, then POKEMON.</li>
       <li>Everyone gets the same team and the same dice each day. One try per day, no rematches.</li>
       <li>Fewest turns wins the day. Missed a day? Play it from the archive: it still counts towards your wins.</li>
       <li>Only the first try counts. After that you can play the day again for practice.</li>
@@ -457,6 +558,7 @@ function renderRecord() {
   const share =
     run?.done && !run.voided
       ? shareText({
+          game: G,
           day,
           won: !!run.won,
           turns: run.turns ?? 0,
@@ -469,7 +571,7 @@ function renderRecord() {
     <p class="who" id="who">Playing as <b>${esc(save.name || "...")}</b></p>
     ${discordRow()}
     <div class="stats"><div><b>${s.played}</b><span>played</span></div><div><b>${s.wins}</b><span>won</span></div><div><b>${s.pct}%</b><span>win rate</span></div><div><b>${s.streak}</b><span>streak</span></div></div>
-    ${done && !run.forfeit ? `<p class="today">${run.won ? "You beat Prof. Oak" : "Prof. Oak won"} in ${run.turns} turns${run.alive != null ? `, ${run.alive} of 5 left` : ""}</p><button class="btn" id="share">Share result</button>` : ""}
+    ${done && !run.forfeit ? `<p class="today">${run.won ? `You beat ${esc(G.bossFull)}` : `${esc(G.bossFull)} won`} in ${run.turns} turns${run.alive != null ? `, ${run.alive} of ${G.size} left` : ""}</p><button class="btn" id="share">Share result</button>` : ""}
     <p class="muted" id="next"></p>
     ${TEST && done ? '<button class="btn ghost" id="reset">Test mode: play again</button>' : ""}`;
   document.getElementById("reset")?.addEventListener("click", () => {
@@ -511,8 +613,10 @@ async function loadStats() {
   try {
     const { status, data } = await api("stats");
     if (status !== 200 || typeof data.trainers !== "number") return;
-    const n = (v: number, one: string) => `${v.toLocaleString()} ${one}${v === 1 ? "" : "s"}`;
-    $("#live").textContent = `${n(data.trainers, "trainer")} | ${n(data.games, "game")} played`;
+    const n = (v: number, one: string) =>
+      `${v.toLocaleString()} ${one}${v === 1 ? "" : "s"}`;
+    $("#live").textContent =
+      `${n(data.trainers, "trainer")} | ${n(data.games, "game")} played`;
   } catch {
     /* offline: the line stays as it was */
   }
@@ -521,7 +625,7 @@ async function loadStats() {
 const updateCountdown = () => {
   const t = Math.max(
       0,
-      Math.floor((dayStart(current + 1) - Date.now()) / 1000),
+      Math.floor((dayStart(current + 1, G.launch) - Date.now()) / 1000),
     ),
     p = (n: number) => String(n).padStart(2, "0");
   const el = document.getElementById("next");
@@ -540,7 +644,7 @@ function renderArchive() {
   }).join("");
   const el = $<HTMLDetailsElement>("#archive");
   if (!el.dataset.init) {
-    el.open = matchMedia("(min-width: 1020px)").matches;
+    el.open = matchMedia("(max-width: 919px), (min-width: 1020px)").matches;
     el.dataset.init = "1";
   }
   const played = Object.values(save.runs).filter(
@@ -571,7 +675,8 @@ function renderBoard() {
     return;
   }
   const d = boardData;
-  const cap = matchMedia("(max-width: 919px)").matches && !boardAll ? 10 : Infinity;
+  const cap =
+    matchMedia("(max-width: 919px)").matches && !boardAll ? 10 : Infinity;
   const rows = (list: any[], cols: (r: any) => string[]) =>
     list?.length
       ? `<table>${list
@@ -584,7 +689,9 @@ function renderBoard() {
                 .map((c) => `<td>${c}</td>`)
                 .join("")}</tr>`,
           )
-          .join("")}</table>${list.length > cap ? `<button class="linkbtn" id="boardmore">Show all ${list.length}</button>` : ""}`
+          .join(
+            "",
+          )}</table>${list.length > cap ? `<button class="linkbtn" id="boardmore">Show all ${list.length}</button>` : ""}`
       : '<p class="muted">Nobody yet.</p>';
   // a number over its label, so "2" and "now" never run together as "2now"
   const num = (n: unknown, label: string, hot = false) =>
@@ -595,12 +702,14 @@ function renderBoard() {
     you = "";
   if (boardTab === "day") {
     body =
-      `<p class="muted">${d.won ?? 0} of ${d.played ?? 0} beat Oak. Fewest turns wins.</p>` +
+      `<p class="muted">${d.won ?? 0} of ${d.played ?? 0} beat ${esc(G.boss)}. Fewest turns wins.</p>` +
       rows(d.today, (r) => [
         num(r.turns, "turns"),
         r.late ? '<span class="late">late</span>' : "",
       ]);
-    you = d.todayRank ? `You are #${d.todayRank} ${archive ? `on day ${day}` : "today"}` : "";
+    you = d.todayRank
+      ? `You are #${d.todayRank} ${archive ? `on day ${day}` : "today"}`
+      : "";
   } else if (boardTab === "all") {
     body =
       `<p class="muted">Most wins, then fewest turns on average.</p>` +
@@ -638,7 +747,23 @@ function renderBoard() {
 
 // ---- flow
 async function main() {
-  current = dayNumber();
+  document.documentElement.dataset.game = G.id;
+  if (G.id === "crystal" && !TEST) markNews();
+  if (!TEST)
+    try {
+      localStorage.setItem("oakle-last", G.id); // the picker at / sends returning players back here
+    } catch {
+      /* storage blocked */
+    }
+  current = dayNumber(new Date(), G.launch);
+  if (current < 1 && !TEST) {
+    // before launch (Crystal): nothing to play yet
+    document.title = `${gameLabel(G)}: opens ${dateOf(1)}`;
+    app.innerHTML = `<div class="soon"><h1>${esc(gameLabel(G).toUpperCase())}</h1><p>Opens ${esc(dateOf(1))}.</p><p><a href="/">All games</a></p></div>`;
+    return;
+  }
+  if (G.id !== "yellow")
+    document.title = `Oakle ${G.title.replace("Pokémon ", "")}: beat ${G.bossFull}. One try a day.`;
   const asked = Number(Q.get("day"));
   day =
     Number.isInteger(asked) && asked >= 1 && (TEST || asked <= current)
@@ -660,19 +785,25 @@ async function main() {
   // cache, or back online.
   if (!TEST) {
     const newDay = () => {
-      if (dayNumber() !== current) location.reload();
+      if (dayNumber(new Date(), G.launch) !== current) location.reload();
     };
     document.addEventListener("visibilitychange", newDay);
-    for (const ev of ["focus", "pageshow", "online"]) addEventListener(ev, newDay);
+    for (const ev of ["focus", "pageshow", "online"])
+      addEventListener(ev, newDay);
   }
   if (!save.id) save.id = hex();
   if (!save.runs[day]?.done)
     loadAssets().catch(() => {
       assets = null;
     }); // fire and forget; ready() reports failures
-  const chunk = await fetch(`/days/${Math.floor((day - 1) / 50)}.json`); // 50 days per file
+  const chunk = await fetch(`${G.days}${Math.floor((day - 1) / 50)}.json`); // 50 days per file
   const data: { days: Day[] } = chunk.ok ? await chunk.json() : { days: [] };
   buildShell();
+  document.getElementById("newsx")?.addEventListener("click", () => {
+    markNews();
+    document.querySelector(".news")?.remove();
+  });
+  document.getElementById("newsgo")?.addEventListener("click", markNews);
   setInterval(updateCountdown, 1000);
   loadStats();
   setInterval(() => {
@@ -867,7 +998,7 @@ const bindAgain = () => {
 };
 function ready(resume: boolean, practice = false) {
   overlay(
-    `<p class="big">OAKLE #${day}</p><p>${esc(save.name)}, PROF. OAK IS WAITING</p><button class="ov-btn" id="go" disabled>LOADING</button><p class="dim">${practice ? "PRACTICE: DOES NOT COUNT" : archive ? "ARCHIVE: ONE TRY PER DAY" : "ONE TRY A DAY"}</p>`,
+    `<p class="big">OAKLE #${day}</p><p>${esc(save.name)}, ${esc(G.bossFull.toUpperCase())} IS WAITING</p><button class="ov-btn" id="go" disabled>LOADING</button><p class="dim">${practice ? "PRACTICE: DOES NOT COUNT" : archive ? "ARCHIVE: ONE TRY PER DAY" : "ONE TRY A DAY"}</p>`,
   );
   const label = resume ? "RESUME" : practice ? "PRACTICE" : "BATTLE";
   prepare(!resume).then(
@@ -944,7 +1075,7 @@ async function submit(run: Run) {
       rom: run.romId,
       cfg: run.cfgId,
       log: run.log,
-      sq: bands(run.party),
+      sq: bands(run.party, G),
     });
     if (r.status === 200) {
       // the server's result is the one that counts
@@ -982,7 +1113,10 @@ async function play(resume: boolean, practice = false) {
   if (resume) {
     const saved = await idbGet(stateKey(day));
     // Saves from before the 2026-10-19 party fix (no cfg) hold a scrambled team on days with a short-moveset mon.
-    const wrongTeam = today.party.some((m) => m.length < 5) && saved && saved.cfg !== (await dayId(today).catch(() => ""));
+    const wrongTeam =
+      today.party.some((m) => m.length < 5) &&
+      saved &&
+      saved.cfg !== (await dayId(today).catch(() => ""));
     if ((saved?.rom && saved.rom !== emu.romId) || wrongTeam) {
       // The game was updated since this battle began, and a save state only works on the ROM and day data it came from.
       // Not the player's fault, so the battle simply starts again on the new one.
@@ -1013,8 +1147,10 @@ async function play(resume: boolean, practice = false) {
   $("#console").dataset.on = "true";
 
   const cfg = await dayId(today).catch(() => "");
+  const mine = emu; // a later game on this page (practice) must never be saved over this one's state
   const saveNow = () =>
     emu &&
+    emu === mine &&
     idbSet(stateKey(day), {
       state: emu.saveState(),
       log: emu.input.log.slice(),
@@ -1026,14 +1162,21 @@ async function play(resume: boolean, practice = false) {
     if (!practice) saveNow();
   }, 5000); // a practice game must not overwrite the counted one's state
   if (!practice) setTimeout(saveNow, 1500);
+  // leaving mid-battle (the Yellow/Crystal tabs, another site, a locked phone): save right then, not up to 5 s ago
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden && !practice) saveNow();
+  });
+  addEventListener("pagehide", () => {
+    if (!practice) saveNow();
+  });
   const poll = window.setInterval(async () => {
     if (!emu) return;
-    const res = readResult(emu.extRam(), day);
+    const res = readResult(emu.extRam(), day, G);
     if (res && practice) {
       haltGame();
       $("#console").dataset.on = "false";
       overlay(
-        `<p class="big">${res.won ? "YOU WON!" : "OAK WINS"}</p><p>${res.turns} TURN${res.turns === 1 ? "" : "S"} TAKEN</p><p>${res.alive} POKEMON LEFT</p>${AGAIN}`,
+        `<p class="big">${res.won ? "YOU WON!" : `${G.boss.toUpperCase()} WINS`}</p><p>${res.turns} TURN${res.turns === 1 ? "" : "S"} TAKEN</p><p>${res.alive} POKEMON LEFT</p>${AGAIN}`,
       );
       bindAgain();
     } else if (res) {
@@ -1042,7 +1185,7 @@ async function play(resume: boolean, practice = false) {
       Object.assign(run, {
         done: true,
         ...res,
-        party: emu.party(),
+        party: emu.party(G),
         log: encodeLog(emu.input.log),
         romName: emu.romName,
         romId: emu.romId,
@@ -1067,7 +1210,7 @@ function result() {
       ? `<p class="big">NOT<br>COUNTED</p><p class="dim">THIS BATTLE WAS NOT FINISHED IN TIME<br>OR COULD NOT BE VERIFIED.<br>IT COUNTS AS NEITHER A WIN NOR A LOSS</p>`
       : lost
         ? `<p class="big">ALREADY<br>BATTLED</p><p class="dim">ONE TRY PER DAY</p>`
-        : `<p class="big">${run.won ? "YOU WON!" : "OAK WINS"}</p><p>${run.turns} TURN${run.turns === 1 ? "" : "S"} TAKEN</p>${run.alive != null ? `<p>${run.alive} POKEMON LEFT</p>` : ""}<p class="dim">${archive ? "PICK ANOTHER DAY IN THE ARCHIVE" : "COME BACK TOMORROW"}</p>`,
+        : `<p class="big">${run.won ? "YOU WON!" : `${G.boss.toUpperCase()} WINS`}</p><p>${run.turns} TURN${run.turns === 1 ? "" : "S"} TAKEN</p>${run.alive != null ? `<p>${run.alive} POKEMON LEFT</p>` : ""}<p class="dim">${archive ? "PICK ANOTHER DAY IN THE ARCHIVE" : "COME BACK TOMORROW"}</p>`,
   );
   overlay($("#overlay").innerHTML + AGAIN);
   bindAgain();

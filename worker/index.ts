@@ -1,13 +1,14 @@
 // API only; static files (page, ROM, emulator) are served by the assets binding in wrangler.toml.
 // ponytail: results are trusted from the client (private site, no server-side emulator replay).
 import {dayNumber} from '../src/day';
+import {GAMES, GAME_IDS, gameOf, type Game} from '../src/games';
 import {decodeLog} from '../src/rom';
 import {cleanCode, cleanName, isBlocked, makeCode, streaks} from './stats';
 import {verify} from './verify';
 import {kickAudit} from './kick';
 import {chip, md, mention, notify, plain} from './discord';
 import {post as bluesky} from './bluesky';
-import {rowFrom, shareText} from '../src/share';
+import {gameLabel, rowFrom, shareText} from '../src/share';
 
 const json = (o: unknown, status = 200, extra: Record<string, string> = {}) => new Response(JSON.stringify(o), {status, headers: {
   'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'strict-transport-security': 'max-age=31536000', ...extra,
@@ -26,6 +27,10 @@ const TABLES = [
   `CREATE TABLE IF NOT EXISTS runs (player_id TEXT NOT NULL, day INTEGER NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER,
      won INTEGER, turns INTEGER, lead INTEGER, log TEXT, late INTEGER NOT NULL DEFAULT 0, alive INTEGER, PRIMARY KEY (player_id, day))`,
   `CREATE INDEX IF NOT EXISTS runs_day ON runs (day, won, turns, finished_at)`,
+  // Crystal's results: same shape as `runs` (a separate table, so Yellow's live data is never touched). Players are shared.
+  `CREATE TABLE IF NOT EXISTS runs_crystal (player_id TEXT NOT NULL, day INTEGER NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER,
+     won INTEGER, turns INTEGER, lead INTEGER, log TEXT, late INTEGER NOT NULL DEFAULT 0, alive INTEGER, verified INTEGER, PRIMARY KEY (player_id, day))`,
+  `CREATE INDEX IF NOT EXISTS runs_crystal_day ON runs_crystal (day, won, turns, finished_at)`,
   `CREATE TABLE IF NOT EXISTS pairs (code TEXT PRIMARY KEY, player_id TEXT NOT NULL, expires_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS throttle (k TEXT PRIMARY KEY, w INTEGER NOT NULL, n INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS oauth_states (state TEXT PRIMARY KEY, player_id TEXT, mode TEXT NOT NULL, expires_at INTEGER NOT NULL)`,
@@ -52,23 +57,24 @@ async function limited(db: any, key: string, max: number) {
 const NAV_DEST = new Set(['document', 'iframe', 'frame', 'embed', 'object']);
 
 // The leaderboard scans whole tables, so requests within a few seconds share one result per day (per Worker isolate).
-const boards = new Map<number, {at: number; rows: any[]}>();
-const boardRows = async (db: any, day: number) => {
-  const hit = boards.get(day);
+const boards = new Map<string, {at: number; rows: any[]}>();
+const boardRows = async (db: any, g: Game, day: number) => {
+  const key = `${g.id}:${day}`;
+  const hit = boards.get(key);
   if (hit && Date.now() - hit.at < BOARD_TTL_MS) return hit.rows;
-  const rows = await Promise.all([
-    db.prepare(`SELECT p.id, p.name, r.turns, r.alive, r.late FROM runs r JOIN players p ON p.id = r.player_id
+  const rows = await Promise.all([ // g.runs is one of the two fixed table names in src/games.ts, never user text
+    db.prepare(`SELECT p.id, p.name, r.turns, r.alive, r.late FROM ${g.runs} r JOIN players p ON p.id = r.player_id
                 WHERE r.day = ? AND r.won = 1 ORDER BY r.turns, r.alive DESC, r.finished_at`).bind(day).all(),
-    db.prepare(`SELECT COUNT(*) AS played, COALESCE(SUM(won), 0) AS won FROM runs WHERE day = ? AND finished_at IS NOT NULL`).bind(day).first(),
+    db.prepare(`SELECT COUNT(*) AS played, COALESCE(SUM(won), 0) AS won FROM ${g.runs} WHERE day = ? AND finished_at IS NOT NULL`).bind(day).first(),
     db.prepare(`SELECT p.id, p.name, SUM(r.won) AS wins, COUNT(*) AS played,
                        ROUND(AVG(CASE WHEN r.won = 1 THEN r.turns END), 1) AS avgTurns
-                FROM runs r JOIN players p ON p.id = r.player_id WHERE r.finished_at IS NOT NULL
+                FROM ${g.runs} r JOIN players p ON p.id = r.player_id WHERE r.finished_at IS NOT NULL
                 GROUP BY p.id ORDER BY wins DESC, avgTurns, played`).all(),
-    db.prepare(`SELECT player_id, day FROM runs WHERE won = 1 AND late = 0`).all(),
+    db.prepare(`SELECT player_id, day FROM ${g.runs} WHERE won = 1 AND late = 0`).all(),
     db.prepare(`SELECT id, name FROM players`).all(),
   ]);
-  if (boards.size > 8) boards.clear(); // days are client-chosen: keep the map small
-  boards.set(day, {at: Date.now(), rows});
+  if (boards.size > 16) boards.clear(); // days are client-chosen: keep the map small
+  boards.set(key, {at: Date.now(), rows});
   return rows;
 };
 // Site-wide counters for the little live line on the page: a few COUNTs, shared for a few seconds per Worker instance.
@@ -78,25 +84,25 @@ declare const HTMLRewriter: any; // Workers runtime global (no @cloudflare/worke
 
 type Env = {DB: any; ASSETS: {fetch: typeof fetch}; FLOOD?: {limit(o: {key: string}): Promise<{success: boolean}>}; VERIFY?: string; GITHUB_TOKEN?: string; GITHUB_REPO?: string; DISCORD_WEBHOOK?: string; DISCORD_RESULTS_WEBHOOK?: string; DISCORD_CLIENT_ID?: string; DISCORD_CLIENT_SECRET?: string; DISCORD_GUILD_ID?: string; BSKY_HANDLE?: string; BSKY_APP_PASSWORD?: string};
 type Ctx = {waitUntil(p: Promise<unknown>): void};
-const WHEN = (day: number, current: number) => day === current ? 'today' : `on Oakle #${day}`;
+const WHEN = (g: Game, day: number, current: number) => day === current ? 'today' : `on ${gameLabel(g)} #${day}`;
 
 /** Discord note for a win: where it lands on that day's board. Called after the run is saved. */
-async function announceWin(db: any, env: Env, id: string, day: number, v: {turns: number; alive: number}, current: number) {
-  const r = await db.prepare(`SELECT p.name, p.discord_id, p.discord_member, (SELECT 1 + COUNT(*) FROM runs
+async function announceWin(db: any, env: Env, g: Game, id: string, day: number, v: {turns: number; alive: number}, current: number) {
+  const r = await db.prepare(`SELECT p.name, p.discord_id, p.discord_member, (SELECT 1 + COUNT(*) FROM ${g.runs}
     WHERE day = ? AND won = 1 AND player_id != ? AND (turns < ? OR (turns = ? AND alive >= ?))) AS rank FROM players p WHERE p.id = ?`)
     .bind(day, id, v.turns, v.turns, v.alive, id).first();
   if (!r?.name) return;
   const who = `**${md(isBlocked(r.name) ? '???' : r.name)}**${chip(r.discord_id, r.discord_member)}`;
   await notify(env, r.rank === 1
-    ? `🥇 ${who} takes #1 ${WHEN(day, current)}: ${v.turns} turns, ${v.alive} left`
-    : `${who} beat Oak in ${v.turns} turns, ${v.alive} left. #${r.rank} ${WHEN(day, current)}`);
+    ? `🥇 ${who} takes #1 ${WHEN(g, day, current)}: ${v.turns} turns, ${v.alive} left`
+    : `${who} beat ${g.boss} in ${v.turns} turns, ${v.alive} left. #${r.rank} ${WHEN(g, day, current)}`);
 }
 
 /** The player's share card for the results channel: the page's Share text with their name, in a code block, no link. */
-async function postResult(db: any, env: Env, id: string, day: number, v: {won: boolean; turns: number; alive: number}, squares: unknown) {
+async function postResult(db: any, env: Env, g: Game, id: string, day: number, v: {won: boolean; turns: number; alive: number}, squares: unknown) {
   const r = await db.prepare(`SELECT name, discord_id, discord_member FROM players WHERE id = ?`).bind(id).first();
   if (!r?.name) return;
-  const card = shareText({day, won: v.won, turns: v.turns, alive: v.alive, who: plain(isBlocked(r.name) ? '???' : r.name), row: rowFrom(squares, v.alive), link: ''});
+  const card = shareText({game: g, day, won: v.won, turns: v.turns, alive: v.alive, who: plain(isBlocked(r.name) ? '???' : r.name), row: rowFrom(squares, v.alive, g), link: ''});
   const who = mention(r.discord_id, r.discord_member); // a mention does not render inside a code block, so it goes on a line above
   await notify({DISCORD_WEBHOOK: env.DISCORD_RESULTS_WEBHOOK}, (who ? who + '\n' : '') + '```\n' + card + '\n```');
 }
@@ -147,47 +153,57 @@ async function discordCallback(req: Request, url: URL, env: Env, db: any, now: n
 }
 
 export default {
-  /** Hourly cron: the moment the day rolls over (Auckland), post the finished day's recap (Discord) and the new day (Bluesky). */
+  /** Hourly cron: the moment a game's day rolls over (Auckland), post the finished day's recap (Discord) and the new day (Bluesky). */
   async scheduled(_event: unknown, env: Env, ctx: Ctx) {
-    const now = Date.now(), n = dayNumber(new Date(now));
-    if (n < 2 || dayNumber(new Date(now - 3_600_000)) === n) return;
-    if (env.BSKY_APP_PASSWORD) ctx.waitUntil((async () => {
-      await ensureSchema(env.DB);
-      const [, count] = await boardRows(env.DB, n - 1);
-      const days = await env.ASSETS.fetch(new Request(`https://assets.invalid/days/${Math.floor((n - 1) / 50)}.json`)).then(r => r.json() as Promise<{days: {day: number; team: {species: string}[]}[]}>);
-      const team = days.days.find(d => d.day === n)?.team.map(m => m.species).join(', ');
-      if (!team) return;
-      const yesterday = count.played ? ` ${count.won} of ${count.played} beat him yesterday.` : '';
-      await bluesky(env, `Oakle #${n} is live. Today's team: ${team}. One try to beat Prof. Oak in the real Pokémon Yellow.${yesterday}\noakle.day`, 'oakle.day');
-    })().catch((e) => console.error('bluesky error', e instanceof Error ? e.message : 'unknown')));
-    if (!env.DISCORD_WEBHOOK) return;
-    ctx.waitUntil((async () => {
-      await ensureSchema(env.DB);
-      const [board, count] = await boardRows(env.DB, n - 1);
-      const winners = board.results.slice(0, 3);
-      const links = new Map<string, any>();
-      if (winners.length) for (const l of (await env.DB.prepare(`SELECT id, discord_id, discord_member FROM players WHERE id IN (${winners.map(() => '?').join(',')})`).bind(...winners.map((r: any) => r.id)).all()).results) links.set(l.id, l);
-      const top = winners.map((r: any, i: number) => `${i + 1}. ${md(isBlocked(r.name) ? '???' : r.name)}${chip(links.get(r.id)?.discord_id, links.get(r.id)?.discord_member)}, ${r.turns} turns`);
-      await notify(env, `**Oakle #${n - 1} recap:** ${count.won} of ${count.played} beat Oak.${top.length ? '\n' + top.join('\n') : ''}`);
-    })().catch((e) => console.error('recap error', e)));
+    const now = Date.now();
+    for (const g of GAME_IDS.map(id => GAMES[id])) {
+      const n = dayNumber(new Date(now), g.launch);
+      if (n < 2 || dayNumber(new Date(now - 3_600_000), g.launch) === n) continue;
+      const label = gameLabel(g);
+      if (env.BSKY_APP_PASSWORD) ctx.waitUntil((async () => {
+        await ensureSchema(env.DB);
+        const [, count] = await boardRows(env.DB, g, n - 1);
+        const days = await env.ASSETS.fetch(new Request(`https://assets.invalid${g.days}${Math.floor((n - 1) / 50)}.json`)).then(r => r.json() as Promise<{days: {day: number; team: {species: string}[]}[]}>);
+        const team = days.days.find(d => d.day === n)?.team.map(m => m.species).join(', ');
+        if (!team) return;
+        const yesterday = count.played ? ` ${count.won} of ${count.played} beat ${g.id === 'yellow' ? 'him' : g.boss} yesterday.` : '';
+        await bluesky(env, `${label} #${n} is live. Today's team: ${team}. One try to beat ${g.bossFull} in the real ${g.title}.${yesterday}\noakle.day`, 'oakle.day');
+      })().catch((e) => console.error('bluesky error', e instanceof Error ? e.message : 'unknown')));
+      if (!env.DISCORD_WEBHOOK) continue;
+      ctx.waitUntil((async () => {
+        await ensureSchema(env.DB);
+        const [board, count] = await boardRows(env.DB, g, n - 1);
+        const winners = board.results.slice(0, 3);
+        const links = new Map<string, any>();
+        if (winners.length) for (const l of (await env.DB.prepare(`SELECT id, discord_id, discord_member FROM players WHERE id IN (${winners.map(() => '?').join(',')})`).bind(...winners.map((r: any) => r.id)).all()).results) links.set(l.id, l);
+        const top = winners.map((r: any, i: number) => `${i + 1}. ${md(isBlocked(r.name) ? '???' : r.name)}${chip(links.get(r.id)?.discord_id, links.get(r.id)?.discord_member)}, ${r.turns} turns`);
+        await notify(env, `**${label} #${n - 1} recap:** ${count.won} of ${count.played} beat ${g.boss}.${top.length ? '\n' + top.join('\n') : ''}`);
+      })().catch((e) => console.error('recap error', e)));
+    }
   },
 
   async fetch(req: Request, env: Env, ctx: Ctx) {
     const url = new URL(req.url), db = env.DB;
     const ip = req.headers.get('CF-Connecting-IP') ?? 'local';
 
-    // Landing page: social-card tags must carry absolute URLs, so make them absolute for whichever host served it.
-    if (url.pathname === '/' || url.pathname === '/index.html') {
-      const page = await env.ASSETS.fetch(req);
+    // Pages: `/` is the game picker, `/yellow` and `/crystal` are the games. Social-card tags must carry absolute URLs,
+    // so make them absolute for whichever host served it.
+    const gameAt = GAME_IDS.map(id => GAMES[id]).find(x => x.path === url.pathname);
+    if (url.pathname === '/' || url.pathname === '/index.html' || gameAt) {
+      // links from before Crystal (/?day=5, /?code=, /?discord=, /?test) belong to Yellow, which used to live at /
+      if (!gameAt && (url.pathname === '/index.html' || (url.search && !url.searchParams.has('pick')))) return Response.redirect(`${url.origin}${gameAt ? '' : '/yellow'}${url.search}`, 302);
+      const asset = await env.ASSETS.fetch(new Request(url.origin + (gameAt ? '/' : '/landing'))); // the game page is the assets' index.html
       return new HTMLRewriter().on('meta[property^="og:"], meta[name^="twitter:"]', {
         element(el: any) {
           const c = el.getAttribute('content');
           if (c && c.startsWith('/')) el.setAttribute('content', url.origin + c);
         },
       }).on('head', {
-        // Added here, not in index.html (Vite would treat href="/" as an asset). ?day=N archive URLs fold into /.
-        element(el: any) { el.append(`<link rel="canonical" href="${url.origin}/">`, {html: true}); },
-      }).transform(page);
+        // Added here, not in index.html (Vite would treat href="/" as an asset). ?day=N archive URLs fold into the game's page.
+        element(el: any) { el.append(`<link rel="canonical" href="${url.origin}${gameAt?.path ?? '/'}">`, {html: true}); },
+      }).on('title', {
+        element(el: any) { if (gameAt && gameAt.id !== 'yellow') el.setInnerContent(`Oakle ${gameAt.title.replace('Pokémon ', '')}: beat ${gameAt.bossFull}. One try a day.`); },
+      }).transform(asset);
     }
     // A path that Cloudflare Access can protect on its own: visiting it forces the login, then lands on the game.
     if (url.pathname === '/signin') return Response.redirect(url.origin + '/', 302);
@@ -205,14 +221,15 @@ export default {
       if (NAV_DEST.has(req.headers.get('Sec-Fetch-Dest') ?? '')) return new Response('Not found', {status: 404});
       return env.ASSETS.fetch(req);
     }
-    const current = dayNumber();
+    let g = gameOf(url.searchParams.get('game'));
+    let current = dayNumber(new Date(), g.launch);
     try {
       await ensureSchema(db);
       // ---- one player's history (source of truth for the archive grid across devices)
       if (url.pathname === '/api/me') {
         const id = url.searchParams.get('id') ?? '';
         if (!ID.test(id)) return json({runs: []});
-        const r = await db.prepare(`SELECT day, won, turns, alive, late FROM runs WHERE player_id = ? AND finished_at IS NOT NULL ORDER BY day`).bind(id).all();
+        const r = await db.prepare(`SELECT day, won, turns, alive, late FROM ${g.runs} WHERE player_id = ? AND finished_at IS NOT NULL ORDER BY day`).bind(id).all();
         const p = await db.prepare(`SELECT discord_id, discord_name, discord_member FROM players WHERE id = ?`).bind(id).first();
         return json({runs: r.results, discord: p?.discord_id ? {name: p.discord_name, member: !!p.discord_member} : null});
       }
@@ -220,8 +237,8 @@ export default {
       // ---- every trainer, and every finished game (archive plays included; abandoned starts are not)
       if (url.pathname === '/api/stats') {
         if (!siteStats || Date.now() - siteStats.at > STATS_TTL_MS) {
-          const all = await db.prepare(`SELECT (SELECT COUNT(*) FROM players) AS trainers, (SELECT COUNT(*) FROM runs WHERE finished_at IS NOT NULL) AS games`).first();
-          siteStats = {at: Date.now(), body: {trainers: all.trainers, games: all.games}};
+          const all = await db.prepare(`SELECT (SELECT COUNT(*) FROM players) AS trainers, (SELECT COUNT(*) FROM runs WHERE finished_at IS NOT NULL) AS yellow, (SELECT COUNT(*) FROM runs_crystal WHERE finished_at IS NOT NULL) AS crystal`).first();
+          siteStats = {at: Date.now(), body: {trainers: all.trainers, games: all.yellow + all.crystal, yellow: all.yellow, crystal: all.crystal}};
         }
         return json(siteStats.body, 200, {'cache-control': 'public, max-age=10'});
       }
@@ -230,7 +247,7 @@ export default {
       if (url.pathname === '/api/leaderboard') {
         const day = Math.min(Math.max(Math.trunc(Number(url.searchParams.get('day'))) || current, 1), current);
         const id = url.searchParams.get('id') ?? '';
-        const [board, count, all, wins, names] = await boardRows(db, day);
+        const [board, count, all, wins, names] = await boardRows(db, g, day);
         const rank = (rows: any[]) => { const i = rows.findIndex(r => r.id === id); return i < 0 ? null : i + 1; };
         const names_ = new Map<string, string>(names.results.map((p: any) => [p.id, p.name]));
         const st = streaks(wins.results, current);
@@ -258,6 +275,8 @@ export default {
       let body: any = null;
       try { if (raw.length <= maxBody) body = JSON.parse(raw); } catch { /* falls through to 400 */ }
       if (!body || typeof body !== 'object') return json({error: 'bad request'}, 400);
+      g = gameOf(body.game ?? url.searchParams.get('game'));
+      current = dayNumber(new Date(), g.launch);
       const now = Date.now();
 
       // ---- no-sign-up device linking: a one-time code that hands this player's id to another device
@@ -324,26 +343,26 @@ export default {
 
       if (url.pathname === '/api/start') {
         await db.prepare(`INSERT OR IGNORE INTO players (id, name, created_at) VALUES (?, ?, ?)`).bind(body.id, safeName(body.name) || 'RED', now).run();
-        const ins = await db.prepare(`INSERT OR IGNORE INTO runs (player_id, day, started_at, late) VALUES (?, ?, ?, ?)`)
+        const ins = await db.prepare(`INSERT OR IGNORE INTO ${g.runs} (player_id, day, started_at, late) VALUES (?, ?, ?, ?)`)
           .bind(body.id, day, now, day < current ? 1 : 0).run();
         if (ins.meta.changes) return json({ok: true});
-        const r = await db.prepare(`SELECT won, turns, alive, finished_at, verified FROM runs WHERE player_id = ? AND day = ?`).bind(body.id, day).first();
+        const r = await db.prepare(`SELECT won, turns, alive, finished_at, verified FROM ${g.runs} WHERE player_id = ? AND day = ?`).bind(body.id, day).first();
         return json({ok: false, finished: r.finished_at != null, void: r.verified === 3, won: r.won, turns: r.turns, alive: r.alive}, 409);
       }
 
       if (url.pathname === '/api/finish') {
-        const r = await db.prepare(`SELECT started_at, finished_at, verified FROM runs WHERE player_id = ? AND day = ?`).bind(body.id, day).first();
+        const r = await db.prepare(`SELECT started_at, finished_at, verified FROM ${g.runs} WHERE player_id = ? AND day = ?`).bind(body.id, day).first();
         if (!r || r.finished_at != null) return json({error: 'no open run'}, 409);
         if (r.verified === 3) return json({void: true});
         const turns = Number(body.turns), alive = Number(body.alive ?? 0);
-        if (typeof body.won !== 'boolean' || !Number.isInteger(turns) || turns < 0 || turns > 255 || !Number.isInteger(alive) || alive < 0 || alive > 5)
+        if (typeof body.won !== 'boolean' || !Number.isInteger(turns) || turns < 0 || turns > 255 || !Number.isInteger(alive) || alive < 0 || alive > g.size)
           return json({error: 'bad result'}, 400);
 
         // Only real results count. A run is a win, a loss, or VOID (still "unfinished", so it counts nowhere), and a win
         // is never turned into a loss. runs.verified: 0 win awaiting audit, 1 replayed, 2 could not be audited,
         // 3 void, null nothing to check. runs.log holds the evidence {name, rom, log} for 0 and 3.
         const voidRun = async (evidence: string | null = null) => {
-          await db.prepare(`UPDATE runs SET verified = 3, log = ? WHERE player_id = ? AND day = ?`).bind(evidence, body.id, day).run();
+          await db.prepare(`UPDATE ${g.runs} SET verified = 3, log = ? WHERE player_id = ? AND day = ?`).bind(evidence, body.id, day).run();
           boards.clear();
           return json({void: true});
         };
@@ -353,7 +372,7 @@ export default {
         // 5 knockouts and a survivor and a loss leaves none; with a replay the replay decides, so a genuine result is never
         // voided on a guess.
         const replayed = env.VERIFY === '1' || env.VERIFY === 'audit';
-        if (turns === 0 || (!replayed && (body.won ? turns < 5 || alive < 1 : alive !== 0))) return voidRun();
+        if (turns === 0 || (!replayed && (body.won ? turns < g.size || alive < 1 : alive !== 0))) return voidRun();
 
         let verdict = {won: body.won as boolean, turns, alive}, evidence: string | null = null, verified: number | null = null;
         const mode = env.VERIFY;
@@ -363,7 +382,7 @@ export default {
           const proof = JSON.stringify({name: cleanName(body.name), rom: String(body.rom ?? '').slice(0, 32), cfg: String(body.cfg ?? '').slice(0, 32), log: body.log});
           if (mode === '1') {
             if (await limited(db, `finish:${ip}`, 6)) return json({error: 'slow down'}, 429);
-            const v = await verify(env.ASSETS, url.origin, day, cleanName(body.name), body.log, body.rom)
+            const v = await verify(env.ASSETS, url.origin, g, day, cleanName(body.name), body.log, body.rom)
               .catch((e) => { console.error('replay error', e); return undefined; });
             if (v === undefined) return json({error: 'verification unavailable'}, 503); // our fault: leave the run open, the page retries
             if (v === null || (v !== 'stale' && v !== 'defer' && !v.won)) return voidRun(proof);
@@ -374,11 +393,11 @@ export default {
             verified = 0; evidence = proof;
           }
         }
-        await db.prepare(`UPDATE runs SET finished_at = ?, won = ?, turns = ?, alive = ?, log = ?, verified = ? WHERE player_id = ? AND day = ?`)
+        await db.prepare(`UPDATE ${g.runs} SET finished_at = ?, won = ?, turns = ?, alive = ?, log = ?, verified = ? WHERE player_id = ? AND day = ?`)
           .bind(now, verdict.won ? 1 : 0, verdict.turns, verdict.alive, evidence, verified, body.id, day).run();
         boards.clear();
-        if (verdict.won && env.DISCORD_WEBHOOK) ctx.waitUntil(announceWin(db, env, body.id, day, verdict, current).catch((e) => console.error('discord error', e)));
-        if (env.DISCORD_RESULTS_WEBHOOK) ctx.waitUntil(postResult(db, env, body.id, day, verdict, body.sq).catch((e) => console.error('discord error', e)));
+        if (verdict.won && env.DISCORD_WEBHOOK) ctx.waitUntil(announceWin(db, env, g, body.id, day, verdict, current).catch((e) => console.error('discord error', e)));
+        if (env.DISCORD_RESULTS_WEBHOOK) ctx.waitUntil(postResult(db, env, g, body.id, day, verdict, body.sq).catch((e) => console.error('discord error', e)));
         if (verified === 0) ctx.waitUntil(kickAudit(env).catch((e) => console.error('audit dispatch error', e))); // audit this win now
         return json(verdict);
       }

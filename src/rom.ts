@@ -2,10 +2,10 @@
 export type Day = {day: number; trainer: number; rng: number[]; party: number[][]};
 export type Result = {won: boolean; turns: number; alive: number};
 
-// ---- cartridge RAM contract with the ROM hack (rom/src/engine/oakle/oakle_party.asm)
-const CFG = {trainer: 6, day: 7, rng: 9, name: 18, party: 29};
-// SRAM bank 1, $bf00: "OAKLE", 1 win/2 loss, turns, day lo, day hi, party Pokemon still standing
-const RESULT_AT = 1 * 0x2000 + 0x1f00;
+import {GAMES, type Game} from './games';
+
+// ---- cartridge RAM contract with the ROM hacks (rom/src/engine/oakle/oakle_party.asm, rom/crystal/src/engine/oakle/oakle.asm)
+// Per game (src/games.ts): config offsets, and the result block "OAKLE", 1 win/2 loss, turns, day lo, day hi, party Pokemon still standing
 
 /** Game charset: A-Z $80.., 0-9 $F6.., space $7F, "-" $E3, terminator $50. */
 const encodeName = (n: string) => {
@@ -18,7 +18,8 @@ const encodeName = (n: string) => {
 const partyBytes = (party: number[][]) => party.flatMap(m => [...m, 0, 0, 0, 0].slice(0, 5));
 
 /** A copy of the ROM with the day's trainer, dice, party and the player's name written into its config block. */
-export function patchRom(rom: Uint8Array, at: number, d: Day, name: string) {
+export function patchRom(rom: Uint8Array, at: number, d: Day, name: string, g: Game = GAMES.yellow) {
+  const CFG = g.cfg;
   const r = rom.slice();
   if (String.fromCharCode(...r.subarray(at, at + 5)) !== 'OAKLE') throw new Error('ROM config not found: rebuild with rom/build.sh');
   r[at + CFG.trainer] = d.trainer;
@@ -30,15 +31,16 @@ export function patchRom(rom: Uint8Array, at: number, d: Day, name: string) {
 }
 
 /** The battle result the ROM wrote to cartridge RAM for this day, or null while there is none. */
-export function readResult(ram: Uint8Array, day: number): Result | null {
+export function readResult(ram: Uint8Array, day: number, g: Game = GAMES.yellow): Result | null {
+  const RESULT_AT = g.result;
   const tag = String.fromCharCode(...ram.subarray(RESULT_AT, RESULT_AT + 5));
   if (tag !== 'OAKLE' || (ram[RESULT_AT + 7] | (ram[RESULT_AT + 8] << 8)) !== day) return null;
   return {won: ram[RESULT_AT + 5] === 1, turns: ram[RESULT_AT + 6], alive: ram[RESULT_AT + 9]};
 }
 
 /** The player's party as [hp, maxHp] pairs, read through `read` (one byte of the Game Boy's address space). */
-export function readParty(read: (addr: number) => number): Array<[number, number]> {
-  const PARTY_COUNT = 0xd162, PARTY = 0xd16a, MON_LEN = 44, HP = 1, MAX_HP = 34; // wPartyCount, wPartyMons in the Yellow RAM map
+export function readParty(read: (addr: number) => number, g: Game = GAMES.yellow): Array<[number, number]> {
+  const {partyCount: PARTY_COUNT, party: PARTY, monLen: MON_LEN, hp: HP, maxHp: MAX_HP} = g.ram;
   const word = (a: number) => (read(a) << 8) | read(a + 1);
   return Array.from({length: Math.min(read(PARTY_COUNT), 6)}, (_, i) => [word(PARTY + i * MON_LEN + HP), word(PARTY + i * MON_LEN + MAX_HP)] as [number, number]);
 }
@@ -126,7 +128,7 @@ const SLICE_FRAMES = 30;
  * like the first (it drifts by a few ticks), and the player's game was the first on its module. `rom` must be patched
  * exactly as the player's was (same day, same name). Null when the game never produced a result for `day`.
  */
-export async function replay(newModule: () => Promise<any>, rom: Uint8Array, log: number[], day: number): Promise<Result | null> {
+export async function replay(newModule: () => Promise<any>, rom: Uint8Array, log: number[], day: number, g: Game = GAMES.yellow): Promise<Result | null> {
   const m = await newModule();
   const size = (rom.length + 0x7fff) & ~0x7fff;
   const ptr = m._malloc(size);
@@ -153,7 +155,7 @@ export async function replay(newModule: () => Promise<any>, rom: Uint8Array, log
       m[SETTER[BUTTONS[log[i + 1] >> 1]]](e, !!(log[i + 1] & 1));
     }
     for (let f = 0; f <= TAIL_FRAMES; f += SLICE_FRAMES) {
-      const r = readResult(ram(), day);
+      const r = readResult(ram(), day, g);
       if (r) return r;
       runTo(ticks() + 70224 * SLICE_FRAMES);
     }

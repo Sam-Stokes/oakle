@@ -2,11 +2,11 @@
   <img src="docs/images/banner.svg" alt="Oakle: Beat Prof. Oak. One try a day." width="100%">
 </p>
 
-<h3 align="center">A daily Pokémon Yellow challenge.</h3>
+<h3 align="center">A daily Pokémon challenge, in Yellow and Crystal.</h3>
 
 <p align="center">
   Everyone gets the same random team.<br>
-  Professor Oak is waiting.<br>
+  Professor Oak (Yellow) or Professor Elm (Crystal) is waiting.<br>
   You get one try.
 </p>
 
@@ -18,7 +18,15 @@
 
 Think Wordle, but you battle. Every day a brand new team of five random Pokémon lands in your hands, the same five for every player in the world, and you have a single attempt to beat Professor Oak's team with it.
 
-It is the real Pokémon Yellow, running right in your browser with its original sound. The battle plays out exactly like the game you remember, only here the stakes are one try, a leaderboard and bragging rights.
+It is the real Pokémon game, running right in your browser with its original sound. The battle plays out exactly like the game you remember, only here the stakes are one try, a leaderboard and bragging rights.
+
+Two games to choose from, each with its own day count, archive, streaks and leaderboards. Your name works in both.
+
+|                  | Pokémon Yellow                      | Pokémon Crystal                                                |
+| ---------------- | ----------------------------------- | -------------------------------------------------------------- |
+| **Your team**    | 5 random Pokémon from the 151       | 6 random Pokémon from all 251                                  |
+| **The opponent** | Professor Oak, five Pokémon, Lv 100 | Professor Elm, six Pokémon, Lv 100, with a starter that changes |
+| **Play**         | [oakle.day/yellow](https://oakle.day/yellow) | [oakle.day/crystal](https://oakle.day/crystal)         |
 
 ## A day in Oakle
 
@@ -52,7 +60,9 @@ Oakle #12 — I beat Oak in 18 turns
 https://oakle.day
 ```
 
-Each square is one of your five Pokémon, in team order: ⬛ fainted, 🟥 almost out, 🟨 half health, 🟩 healthy. It shows how the battle went without giving away your team or your moves.
+Crystal cards read `Oakle Crystal #3 — I beat Elm in 24 turns` with six squares.
+
+Each square is one of your Pokémon, in team order: ⬛ fainted, 🟥 almost out, 🟨 half health, 🟩 healthy. It shows how the battle went without giving away your team or your moves.
 
 ## Fair play
 

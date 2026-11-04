@@ -1,5 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {dayNumber, dayStart} from '../src/day';
+import {GAMES} from '../src/games';
 
 describe('day rollover', () => {
   it('rolls at local midnight in TZ, not UTC', () => {
@@ -16,5 +17,14 @@ describe('day rollover', () => {
       expect(dayNumber(new Date(s))).toBe(d);
       expect(dayNumber(new Date(s - 1))).toBe(d - 1);
     }
+  });
+  it('each game counts from its own launch date', () => {
+    const c = GAMES.crystal.launch; // Crystal #1 starts at midnight on its launch date in Auckland
+    const start = dayStart(1, c);
+    expect(dayNumber(new Date(start - 1), c)).toBe(0);
+    expect(dayNumber(new Date(start), c)).toBe(1);
+    expect(dayNumber(new Date(dayStart(2, c)), c)).toBe(2);
+    expect(dayNumber(new Date(start))).toBeGreaterThanOrEqual(1); // Yellow is the default and older (or same age)
+    expect(dayStart(1)).toBe(dayStart(1, GAMES.yellow.launch));
   });
 });

@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#d6d9df">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#13151a">
+  <title>Oakle: Daily Pokémon Battles, One Try a Day</title>
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <meta name="description" content="A daily Pokémon game like Wordle: everyone gets the same random team and one try to beat a Pokémon professor in the real game, right in your browser. Play Pokémon Yellow against Professor Oak or Pokémon Crystal against Professor Elm.">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Oakle">
+  <meta property="og:title" content="Oakle: pick your battle">
+  <meta property="og:description" content="A new random team every day against Professor Oak (Pokémon Yellow) or Professor Elm (Pokémon Crystal). One try a day.">
+  <meta property="og:image" content="/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Professor Oak challenges you to a battle in a Game Boy Color Pokemon game">
+  <meta property="og:url" content="/">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Oakle: pick your battle">
+  <meta name="twitter:description" content="A new random team every day. One try a day.">
+  <meta name="twitter:image" content="/og.png">
+  <link rel="preload" href="/fonts/pressstart2p.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit.woff2" as="font" type="font/woff2" crossorigin>
+</head>
+<body>
+  <main id="app" class="land">
+    <header class="land-top">
+      <h1>OAKLE</h1>
+      <p>A daily Pokémon challenge. Everyone gets the same random team. You get one try to beat the professor.</p>
+    </header>
+    <nav class="picks" aria-label="Choose a game">
+      <a class="pick" href="/yellow" data-game="yellow">
+        <img class="pick-art" src="/sprites/84.png" alt="" width="96" height="96">
+        <span class="pick-gen">GEN 1</span>
+        <h2>Pokémon Yellow</h2>
+        <p class="pick-boss">vs Professor Oak</p>
+        <p class="pick-text">Five random Pokémon from the original 151 against Oak's unused team of five.</p>
+        <span class="pick-go">PLAY YELLOW</span>
+      </a>
+      <a class="pick" href="/crystal" data-game="crystal">
+        <img class="pick-art" src="/sprites/crystal/245.png" alt="" width="96" height="96">
+        <span class="pick-gen">GEN 2</span>
+        <h2>Pokémon Crystal</h2>
+        <p class="pick-boss">vs Professor Elm</p>
+        <p class="pick-text">Six random Pokémon from all 251 against Elm's team of six, with a starter that changes daily.</p>
+        <span class="pick-go">PLAY CRYSTAL</span>
+      </a>
+    </nav>
+    <p class="land-foot">One name, one leaderboard per game. Your name works in both.</p>
+  </main>
+  <script type="module" src="/src/landing.ts"></script>
+</body>
+</html>

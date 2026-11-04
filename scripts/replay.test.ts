@@ -51,9 +51,9 @@ describe.skipIf(!ready)('a real battle', () => {
     const tap = (b: Button, hold = 4, wait = 14) => { input.press(b, true, ticks(), set); step(hold); input.press(b, false, ticks(), set); step(wait); };
 
     step(600);
-    for (let i = 0; i < 40; i++) tap('a', 4, 30);       // intro text
-    tap('left', 14, 30); tap('up', 3, 20); tap('a', 4, 120); // walk to Oak and talk to him
-    let seed = 11; const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32);
+    for (let i = 0; i < 40; i++) tap('a', 4, 30);       // Oak's opening text, then talking to him
+    tap('left', 14, 30); tap('up', 3, 20); tap('a', 4, 120); // the player now starts right under Oak (the 40 taps above read his text and start the fight): these are idle extras
+    let seed = 12; const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32);
     const pool: Button[] = ['a', 'a', 'a', 'a', 'a', 'a', 'b', 'up', 'down', 'left', 'right'];
     let saved: {state: Uint8Array; log: number[]} | null = null;
     live = null;

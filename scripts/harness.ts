@@ -48,7 +48,7 @@ export async function setup(
   const tick = async (at: number) => { vi.setSystemTime(at); await worker.scheduled(null, e, ctx); await flush(); };
   const play = async (c: string, name: string, won: boolean, turns: number, alive: number, day = TODAY, extra: object = {}) => {
     await call('/api/name', {id: id(c), name});
-    await call('/api/start', {id: id(c), name, day});
+    await call('/api/start', {id: id(c), name, day, game: (extra as any).game});
     return call('/api/finish', {id: id(c), day, won, turns, alive, ...extra});
   };
   const text = (starts: string) => sent.filter(m => m.url === HOOK).map(m => m.content as string).filter(t => t.startsWith(starts)); // the feed
