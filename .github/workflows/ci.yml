@@ -11,7 +11,7 @@ jobs:
       - run: npm run typecheck
       # the tests read the baked day data (public/days/), which is generated from the pinned pret decomps' constants: fetch
       # those (no ROM is built here) and bake it, as `npm run deploy` does
-      - run: FETCH_ONLY=1 sh rom/build.sh && FETCH_ONLY=1 sh rom/crystal/build.sh
+      - run: FETCH_ONLY=1 sh rom/build.sh && FETCH_ONLY=1 sh rom/crystal/build.sh && FETCH_ONLY=1 sh rom/emerald/build.sh
       - run: npm run days
       - run: npm test
       - run: npm run check

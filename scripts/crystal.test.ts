@@ -73,7 +73,7 @@ describe('Crystal', () => {
     const t = await setup({});
     await t.play('a', 'ASH', true, 15, 3, CDAY, crystal());
     await t.play('a', 'ASH', true, 20, 2, CDAY); // Yellow archive
-    expect(await (await t.call('/api/stats')).json()).toEqual({trainers: 1, games: 2, yellow: 1, crystal: 1});
+    expect(await (await t.call('/api/stats')).json()).toEqual({trainers: 1, games: 2, yellow: 1, crystal: 1, emerald: 0});
   });
 
   it('names Elm, and the game, in the feed and on the results card', async () => {

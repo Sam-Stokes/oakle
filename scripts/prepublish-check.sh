@@ -3,8 +3,8 @@
 cd "$(dirname "$0")/.."
 fail=0
 files=$(git ls-files --cached --others --exclude-standard 2>/dev/null)
-echo "$files" | grep -iE '\.(gb|gbc|sav|rom|ips|bps)$' && { echo "ERROR: ROM-like file in the publishable set"; fail=1; }
-echo "$files" | grep -E '^(public/(og|favicon|apple-touch-icon)\.png|public/rom/|public/days/|public/sprites/|rom/(pokeyellow-pristine|src|work|tools|crystal/(pokecrystal-pristine|src|work))/|wrangler\.local\.toml|\.mcp\.json|CLAUDE\.md|TEMP-NOTES\.md)' && { echo "ERROR: private or generated file in the publishable set"; fail=1; }
+echo "$files" | grep -iE '\.(gb|gbc|gba|sav|rom|ips|bps)$' && { echo "ERROR: ROM-like file in the publishable set"; fail=1; }
+echo "$files" | grep -E '^(public/(og|favicon|apple-touch-icon)\.png|public/rom/|public/days/|public/sprites/|rom/(pokeyellow-pristine|src|work|tools|crystal/(pokecrystal-pristine|src|work)|emerald/(pokeemerald-pristine|baseline|src|work))/|emu/mgba/(src|build)/|wrangler\.local\.toml|\.mcp\.json|CLAUDE\.md|TEMP-NOTES\.md)' && { echo "ERROR: private or generated file in the publishable set"; fail=1; }
 big=$(echo "$files" | while read -r f; do [ -f "$f" ] && [ "$(wc -c < "$f")" -gt 1500000 ] && echo "$f"; done)
 [ -n "$big" ] && { echo "ERROR: large files (ROM-sized?):"; echo "$big"; fail=1; }
 echo "$files" | xargs grep -lIE '/Users/|sam_stokes|BEGIN [A-Z ]*PRIVATE KEY' 2>/dev/null | grep -v '^scripts/prepublish-check.sh$' && { echo "ERROR: personal path or key in the files above"; fail=1; }

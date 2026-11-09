@@ -1,22 +1,27 @@
-// Headless binjgb harness for tests and ROM debugging (Node). CommonJS because binjgb.js is a browser build.
+// Headless emulator harness for tests and ROM debugging (Node): binjgb (Game Boy) or mGBA (Gen 3), same C API. CommonJS because both .js files are browser builds.
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
 
 const dir = path.join(__dirname, '..', 'public', 'emu');
-const TICKS_PER_FRAME = 70224;
+// per emulator (the `emu.global` of a game in src/games.ts): file name, ticks per frame and per ms, screen
+const EMUS = {
+  Binjgb: {file: 'binjgb', frame: 70224, ms: 4194.304, w: 160, h: 144},
+  Mgba: {file: 'mgba', frame: 280896, ms: 16777.216, w: 240, h: 160},
+};
 
-async function load() {
-  const mod = {exports: {}};
-  new Function('module', 'exports', 'require', '__dirname', '__filename', fs.readFileSync(path.join(dir, 'binjgb.js'), 'utf8'))(mod, mod.exports, require, dir, path.join(dir, 'binjgb.js'));
-  const wasm = fs.readFileSync(path.join(dir, 'binjgb.wasm'));
+async function load(name = 'Binjgb') {
+  const f = EMUS[name].file, mod = {exports: {}};
+  new Function('module', 'exports', 'require', '__dirname', '__filename', fs.readFileSync(path.join(dir, f + '.js'), 'utf8'))(mod, mod.exports, require, dir, path.join(dir, f + '.js'));
+  const wasm = fs.readFileSync(path.join(dir, f + '.wasm'));
   return mod.exports({instantiateWasm(imports, done) { WebAssembly.instantiate(wasm, imports).then(r => done(r.instance, r.module)); return {}; }});
 }
 
 const BUTTONS = {up: '_set_joyp_up', down: '_set_joyp_down', left: '_set_joyp_left', right: '_set_joyp_right', a: '_set_joyp_A', b: '_set_joyp_B', start: '_set_joyp_start', select: '_set_joyp_select'};
 
-async function boot(rom, sampleRate = 44100) {
-  const m = await load();
+async function boot(rom, sampleRate = 44100, name = 'Binjgb') {
+  const E = EMUS[name], TICKS_PER_FRAME = E.frame;
+  const m = await load(name);
   const size = (rom.length + 0x7fff) & ~0x7fff;
   const ptr = m._malloc(size);
   const heap = new Uint8Array(m.HEAP8.buffer, ptr, size); heap.fill(0); heap.set(rom);
@@ -46,17 +51,17 @@ async function boot(rom, sampleRate = 44100) {
     },
     // like the page: free-running slices of ~16.67 ms, handling events the way src/emu.ts does
     runRealtime(frames, hooks = {}) {
-      const slice = 4194.304 * 16.667;
-      for (let n = 0; n < frames * 70224 / slice; n++) {
+      const slice = E.ms * 16.667;
+      for (let n = 0; n < frames * E.frame / slice; n++) {
         const until = m._emulator_get_ticks_f64(e) + slice;
         for (;;) { const ev = m._emulator_run_until_f64(e, until); if (ev & 1) hooks.frame && hooks.frame(); if (ev & 4) break; }
-        api.frame += slice / 70224;
+        api.frame += slice / E.frame;
         hooks.slice && hooks.slice(n);
       }
     },
     colors() { return new Set(new Uint32Array(api.pixels().buffer)).size; },
     screenshot(file, scale = 3) {
-      const W = 160, H = 144, px = api.pixels(), w = W * scale, h = H * scale;
+      const W = E.w, H = E.h, px = api.pixels(), w = W * scale, h = H * scale;
       const raw = Buffer.alloc((w * 4 + 1) * h);
       for (let y = 0; y < h; y++) {
         raw[y * (w * 4 + 1)] = 0;

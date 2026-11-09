@@ -2,11 +2,11 @@
   <img src="docs/images/banner.svg" alt="Oakle: Beat Prof. Oak. One try a day." width="100%">
 </p>
 
-<h3 align="center">A daily Pokémon challenge, in Yellow and Crystal.</h3>
+<h3 align="center">A daily Pokémon challenge, in Yellow, Crystal and Emerald.</h3>
 
 <p align="center">
   Everyone gets the same random team.<br>
-  Professor Oak (Yellow) or Professor Elm (Crystal) is waiting.<br>
+  Professor Oak (Yellow), Professor Elm (Crystal) or Professor Birch (Emerald) is waiting.<br>
   You get one try.
 </p>
 
@@ -20,13 +20,13 @@ Think Wordle, but you battle. Every day a brand new team of five random Pokémon
 
 It is the real Pokémon game, running right in your browser with its original sound. The battle plays out exactly like the game you remember, only here the stakes are one try, a leaderboard and bragging rights.
 
-Two games to choose from, each with its own day count, archive, streaks and leaderboards. Your name works in both.
+Three games to choose from, each with its own day count, archive, streaks and leaderboards. Your name works in all of them.
 
-|                  | Pokémon Yellow                      | Pokémon Crystal                                                |
-| ---------------- | ----------------------------------- | -------------------------------------------------------------- |
-| **Your team**    | 5 random Pokémon from the 151       | 6 random Pokémon from all 251                                  |
-| **The opponent** | Professor Oak, five Pokémon, Lv 100 | Professor Elm, six Pokémon, Lv 100, with a starter that changes |
-| **Play**         | [oakle.day/yellow](https://oakle.day/yellow) | [oakle.day/crystal](https://oakle.day/crystal)         |
+|                  | Pokémon Yellow                      | Pokémon Crystal                                                | Pokémon Emerald                                                  |
+| ---------------- | ----------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------- |
+| **Your team**    | 5 random Pokémon from the 151       | 6 random Pokémon from all 251                                  | 6 random Pokémon from all 386                                    |
+| **The opponent** | Professor Oak, five Pokémon, Lv 100 | Professor Elm, six Pokémon, Lv 100, with a starter that changes | Professor Birch, six Pokémon, Lv 100, with a starter that changes |
+| **Play**         | [oakle.day/yellow](https://oakle.day/yellow) | [oakle.day/crystal](https://oakle.day/crystal)         | [oakle.day/emerald](https://oakle.day/emerald)                   |
 
 ## A day in Oakle
 
@@ -60,7 +60,7 @@ Oakle #12 — I beat Oak in 18 turns
 https://oakle.day
 ```
 
-Crystal cards read `Oakle Crystal #3 — I beat Elm in 24 turns` with six squares.
+Crystal and Emerald cards read `Oakle Crystal #3 — I beat Elm in 24 turns` and `Oakle Emerald #2 — I beat Birch in 22 turns`, with six squares.
 
 Each square is one of your Pokémon, in team order: ⬛ fainted, 🟥 almost out, 🟨 half health, 🟩 healthy. It shows how the battle went without giving away your team or your moves.
 

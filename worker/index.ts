@@ -31,6 +31,10 @@ const TABLES = [
   `CREATE TABLE IF NOT EXISTS runs_crystal (player_id TEXT NOT NULL, day INTEGER NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER,
      won INTEGER, turns INTEGER, lead INTEGER, log TEXT, late INTEGER NOT NULL DEFAULT 0, alive INTEGER, verified INTEGER, PRIMARY KEY (player_id, day))`,
   `CREATE INDEX IF NOT EXISTS runs_crystal_day ON runs_crystal (day, won, turns, finished_at)`,
+  // Emerald's results: the same again
+  `CREATE TABLE IF NOT EXISTS runs_emerald (player_id TEXT NOT NULL, day INTEGER NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER,
+     won INTEGER, turns INTEGER, lead INTEGER, log TEXT, late INTEGER NOT NULL DEFAULT 0, alive INTEGER, verified INTEGER, PRIMARY KEY (player_id, day))`,
+  `CREATE INDEX IF NOT EXISTS runs_emerald_day ON runs_emerald (day, won, turns, finished_at)`,
   `CREATE TABLE IF NOT EXISTS pairs (code TEXT PRIMARY KEY, player_id TEXT NOT NULL, expires_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS throttle (k TEXT PRIMARY KEY, w INTEGER NOT NULL, n INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS oauth_states (state TEXT PRIMARY KEY, player_id TEXT, mode TEXT NOT NULL, expires_at INTEGER NOT NULL)`,
@@ -239,8 +243,9 @@ export default {
       // ---- every trainer, and every finished game (archive plays included; abandoned starts are not)
       if (url.pathname === '/api/stats') {
         if (!siteStats || Date.now() - siteStats.at > STATS_TTL_MS) {
-          const all = await db.prepare(`SELECT (SELECT COUNT(*) FROM players) AS trainers, (SELECT COUNT(*) FROM runs WHERE finished_at IS NOT NULL) AS yellow, (SELECT COUNT(*) FROM runs_crystal WHERE finished_at IS NOT NULL) AS crystal`).first();
-          siteStats = {at: Date.now(), body: {trainers: all.trainers, games: all.yellow + all.crystal, yellow: all.yellow, crystal: all.crystal}};
+          // g.runs is one of the fixed table names in src/games.ts, never user text
+          const all = await db.prepare(`SELECT (SELECT COUNT(*) FROM players) AS trainers, ${GAME_IDS.map(id => `(SELECT COUNT(*) FROM ${GAMES[id].runs} WHERE finished_at IS NOT NULL) AS ${id}`).join(', ')}`).first();
+          siteStats = {at: Date.now(), body: {trainers: all.trainers, games: GAME_IDS.reduce((n, id) => n + all[id], 0), ...Object.fromEntries(GAME_IDS.map(id => [id, all[id]]))}};
         }
         return json(siteStats.body, 200, {'cache-control': 'public, max-age=10'});
       }

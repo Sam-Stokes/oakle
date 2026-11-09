@@ -1,6 +1,6 @@
 import "./style.css";
 import { dayNumber, dayStart, TZ } from "./day";
-import { Emu, loadBinjgb, type Button } from "./emu";
+import { Emu, loadEmulator, type Button } from "./emu";
 import { GAME_IDS, GAMES, type Game } from "./games";
 import {
   dayId,
@@ -18,7 +18,7 @@ const DISCORD = "https://discord.gg/m8M94k6NbZ";
 // The Discord mark (Simple Icons, CC0; the logo itself is Discord's trademark, used here only to link to their service).
 const DISCORD_ICON = `<svg class="dc" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></svg>`;
 
-type Mon = { species: string; moves: string[] };
+type Mon = { species: string; moves: string[]; ability?: string }; // ability: from Gen 3 on
 type Day = RomDay & { team: Mon[] };
 // log/romName/romId: the replay evidence for a finished battle, kept until the server has accepted it. voided: the
 // battle does not count (finished after its day ended, or not verifiable): neither a win nor a loss.
@@ -44,12 +44,11 @@ type Save = { id: string; name: string; runs: Record<number, Run> };
 const Q = new URLSearchParams(location.search);
 const LOCAL = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname); // never honoured on the deployed site
 const TEST = LOCAL && Q.has("test");
-// Which game this page is: /crystal is Crystal, anything else Yellow (localhost can pick with ?game=crystal).
+// Which game this page is: /crystal is Crystal, /emerald Emerald, anything else Yellow (localhost can pick with ?game=emerald).
 const G: Game =
-  location.pathname.startsWith("/crystal") ||
-  (LOCAL && Q.get("game") === "crystal")
-    ? GAMES.crystal
-    : GAMES.yellow;
+  GAME_IDS.map((id) => GAMES[id]).find(
+    (g) => location.pathname.startsWith(g.path) || (LOCAL && Q.get("game") === g.id),
+  ) ?? GAMES.yellow;
 // One trainer (id + name) for both games; each game keeps its own runs (src/trainer.ts).
 const KEY = TEST ? "oakle-test" : gameKey(G.id);
 const ID_KEY_ = TEST ? "" : ID_KEY;
@@ -90,8 +89,8 @@ try {
   /* default: sound on */
 }
 
-// "Crystal is here" banner on Yellow's page: gone for good once it is closed or Crystal has been opened.
-const NEWS_KEY = "oakle-news-crystal";
+// "Emerald is here" banner on the other games' pages: gone for good once it is closed or Emerald has been opened.
+const NEWS_KEY = "oakle-news-emerald";
 const newsSeen = () => {
   try {
     return !!localStorage.getItem(NEWS_KEY);
@@ -213,14 +212,15 @@ const loadAssets = () =>
     fetch(G.romMeta).then((r) => r.json()),
   ]));
 let prepared: Promise<Emu> | null = null;
-// every emulator gets its own fresh module (loadBinjgb), never one that already ran a game
+// every emulator gets its own fresh module (loadEmulator), never one that already ran a game
 const prepare = (warm = true) =>
-  (prepared ??= Promise.all([loadBinjgb(), loadAssets()]).then(
+  (prepared ??= Promise.all([loadEmulator(G.emu), loadAssets()]).then(
     async ([mod, [rom, meta]]) => {
       const e = new Emu(
         mod,
         patchRom(new Uint8Array(rom), meta.config, today, save.name, G),
         $<HTMLCanvasElement>("#screen"),
+        G,
       );
       e.romName = save.name;
       e.romId = await romId(new Uint8Array(rom)).catch(() => ""); // needs a secure context; '' just means "not auditable"
@@ -272,12 +272,12 @@ function buildShell() {
         `<a class="gtab" href="${g.path}"${g.id === G.id ? ' aria-current="page"' : ""}>${esc(g.title.replace("Pokémon ", ""))}<small>Gen ${g.gen}</small></a>`,
     )
     .join("");
-  const crystalOpen = dayNumber(new Date(), GAMES.crystal.launch) >= 1;
+  const emeraldOpen = dayNumber(new Date(), GAMES.emerald.launch) >= 1;
   const banner =
-    G.id === "yellow" && !TEST && !newsSeen()
+    G.id !== "emerald" && !TEST && !newsSeen()
       ? `<aside class="news" role="status">
-      <p><b>${crystalOpen ? "NEW" : "SOON"}</b>${crystalOpen ? "Pokémon Crystal is out! Six random Pokémon against Professor Elm, one try a day." : `Pokémon Crystal opens ${esc(dateOf(1, GAMES.crystal))}. Six random Pokémon against Professor Elm.`}</p>
-      <a class="news-go" id="newsgo" href="${GAMES.crystal.path}">${crystalOpen ? "PLAY CRYSTAL" : "SEE CRYSTAL"}</a>
+      <p><b>${emeraldOpen ? "NEW" : "SOON"}</b>${emeraldOpen ? "Pokémon Emerald is out! Six random Pokémon against Professor Birch, one try a day." : `Pokémon Emerald opens ${esc(dateOf(1, GAMES.emerald))}. Six random Pokémon against Professor Birch.`}</p>
+      <a class="news-go" id="newsgo" href="${GAMES.emerald.path}">${emeraldOpen ? "PLAY EMERALD" : "SEE EMERALD"}</a>
       <button class="news-x" id="newsx" aria-label="Dismiss">×</button>
     </aside>`
       : "";
@@ -297,7 +297,7 @@ function buildShell() {
     <div class="grid">
       <main class="stage" id="console" data-on="false">
         <div class="screen-frame" id="frame">
-          <canvas id="screen" width="160" height="144" aria-label="Game screen"></canvas>
+          <canvas id="screen" width="${G.emu.w}" height="${G.emu.h}" aria-label="Game screen"></canvas>
           <div class="overlay" id="overlay"></div>
         </div>
         <div class="pad" aria-label="On-screen controls">
@@ -398,6 +398,8 @@ const overlay = (html: string | null) => {
 };
 
 // ---- side cards
+/** The ability as a plain caption under the picture (only in the generations that have abilities). */
+const abilityCaption = (a?: string) => (a ? `<span class="ability">${esc(a)}</span>` : "");
 const renderTeam = () => {
   const el = $<HTMLDetailsElement>("#team");
   if (!el.dataset.init) {
@@ -405,7 +407,7 @@ const renderTeam = () => {
     el.dataset.init = "1";
   } // open to start with; after that it stays as the player left it
   const picture = (i: number) =>
-    `<img class="sprite" src="${G.sprites}${today.party[i]?.[0]}.png" alt="" width="56" height="56">`;
+    `<div class="pic"><img class="sprite" src="${G.sprites}${today.party[i]?.[0]}.png" alt="" width="56" height="56">${abilityCaption(today.team[i].ability)}</div>`;
   el.innerHTML = `<summary><span>${archive ? `Team for #${day}` : "Your team today"}</span></summary>
     <div class="team-list">${today.team.map((m, i) => `<div class="mon">${picture(i)}<b><i>${i + 1}</i>${esc(m.species)}</b><ul>${m.moves.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>`).join("")}</div>`;
   // the pictures are fetched at build time; when one is missing the row just shows without it
@@ -416,8 +418,8 @@ const renderTeam = () => {
 
 // The boss's team: mirrors ProfOakData + special_moves in rom/patches/oakle.patch (Yellow) and PokemonProfGroup in
 // rom/crystal/patches/oakle-crystal.patch (Crystal), all Lv 100. Only the starter slot changes with the day (trainer 1..3),
-// so it is shown as a mystery. `id` is the picture's number: the ROM's internal species id in Yellow, the Pokedex number in Crystal.
-type BossMon = { id: number; name: string; moves: string[] };
+// so it is shown as a mystery. Emerald's abilities were read from the game itself (a trainer's Pokemon get theirs from a personality value). `id` is the picture's number: the ROM's internal species id in Yellow and Emerald, the Pokedex number in Crystal.
+type BossMon = { id: number; name: string; moves: string[]; ability?: string };
 const BOSS: Record<Game["id"], BossMon[]> = {
   yellow: [
     {
@@ -470,6 +472,39 @@ const BOSS: Record<Game["id"], BossMon[]> = {
       moves: ["Crunch", "Rock Slide", "Earthquake", "Fire Blast"],
     },
   ],
+  emerald: [
+    {
+      id: 394,
+      name: "Gardevoir",
+      ability: "Synchronize",
+      moves: ["Psychic", "Thunderbolt", "Shadow Ball", "Calm Mind"],
+    },
+    {
+      id: 384,
+      name: "Aggron",
+      ability: "Sturdy",
+      moves: ["Earthquake", "Iron Tail", "Rock Tomb", "Thunderbolt"],
+    },
+    {
+      id: 334,
+      name: "Flygon",
+      ability: "Levitate",
+      moves: ["Earthquake", "Dragon Claw", "Fire Blast", "Rock Tomb"],
+    },
+    { id: 0, name: "???", moves: ["Sceptile, Blaziken", "or Swampert"] },
+    {
+      id: 329,
+      name: "Milotic",
+      ability: "Marvel Scale",
+      moves: ["Surf", "Ice Beam", "Recover", "Toxic"],
+    },
+    {
+      id: 397,
+      name: "Salamence",
+      ability: "Intimidate",
+      moves: ["Dragon Claw", "Fire Blast", "Earthquake", "Fly"],
+    },
+  ],
 };
 function renderOak() {
   const el = $<HTMLDetailsElement>("#oak");
@@ -479,7 +514,7 @@ function renderOak() {
   } // open where there is room
   el.innerHTML = `<summary><span>${esc(G.bossFull)}'s team</span></summary>
     <p class="muted">His team never changes, only his starter does.</p>
-    <div class="team-list oak-list">${BOSS[G.id].map((m, i) => `<div class="mon">${m.id ? `<img class="sprite" src="${G.sprites}${m.id}.png" alt="" width="56" height="56">` : '<span class="sprite q" aria-hidden="true">?</span>'}<b><i>${i + 1}</i>${esc(m.name)}</b><ul>${m.moves.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>`).join("")}</div>`;
+    <div class="team-list oak-list">${BOSS[G.id].map((m, i) => `<div class="mon"><div class="pic">${m.id ? `<img class="sprite" src="${G.sprites}${m.id}.png" alt="" width="56" height="56">` : '<span class="sprite q" aria-hidden="true">?</span>'}${abilityCaption(m.ability)}</div><b><i>${i + 1}</i>${esc(m.name)}</b><ul>${m.moves.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>`).join("")}</div>`;
   el.querySelectorAll<HTMLImageElement>(".sprite").forEach((img) =>
     img.addEventListener("error", () => img.remove()),
   );
@@ -748,7 +783,8 @@ function renderBoard() {
 // ---- flow
 async function main() {
   document.documentElement.dataset.game = G.id;
-  if (G.id === "crystal" && !TEST) markNews();
+  document.documentElement.style.setProperty("--ar", String(G.emu.w / G.emu.h)); // screen shape: 10:9 on the Game Boy, 3:2 on the GBA
+  if (G.id === "emerald" && !TEST) markNews();
   if (!TEST)
     try {
       localStorage.setItem("oakle-last", G.id); // the picker at / sends returning players back here
@@ -768,7 +804,9 @@ async function main() {
   day =
     Number.isInteger(asked) && asked >= 1 && (TEST || asked <= current)
       ? asked
-      : current;
+      : TEST
+        ? Math.max(current, 1) // before a game's launch day, test mode plays day 1
+        : current;
   archive = day < current;
   // back from Discord: a sign-in code that adopts the linked trainer, or the outcome of linking
   const loginCode = Q.get("code"),
@@ -1116,7 +1154,7 @@ async function play(resume: boolean, practice = false) {
     const wrongTeam =
       today.party.some((m) => m.length < 5) &&
       saved &&
-      saved.cfg !== (await dayId(today).catch(() => ""));
+      saved.cfg !== (await dayId(today, G).catch(() => ""));
     if ((saved?.rom && saved.rom !== emu.romId) || wrongTeam) {
       // The game was updated since this battle began, and a save state only works on the ROM and day data it came from.
       // Not the player's fault, so the battle simply starts again on the new one.
@@ -1146,7 +1184,7 @@ async function play(resume: boolean, practice = false) {
   overlay(null);
   $("#console").dataset.on = "true";
 
-  const cfg = await dayId(today).catch(() => "");
+  const cfg = await dayId(today, G).catch(() => "");
   const mine = emu; // a later game on this page (practice) must never be saved over this one's state
   const saveNow = () =>
     emu &&
@@ -1181,7 +1219,7 @@ async function play(resume: boolean, practice = false) {
       bindAgain();
     } else if (res) {
       const run = save.runs[day];
-      const cfgId = await dayId(today).catch(() => ""); // which day data this battle was played with
+      const cfgId = await dayId(today, G).catch(() => ""); // which day data this battle was played with
       Object.assign(run, {
         done: true,
         ...res,

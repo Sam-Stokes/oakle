@@ -2,10 +2,11 @@ Oakle is an unofficial fan project. It is not affiliated with, endorsed by or sp
 Game Freak or The Pokemon Company. Pokemon and Pokemon character names are trademarks of their owners.
 
 This repository contains NO game data: no ROM, no sprites, no music. The game is built locally from the public
-pret/pokeyellow and pret/pokecrystal disassemblies (fetched at build time by rom/build.sh and rom/crystal/build.sh,
-each pinned to one commit) plus the patches in rom/patches/ and rom/crystal/patches/. The favicon, the social
-card and the small team pictures are generated or downloaded at build time and are not committed (the pictures come
-from the Yellow and Crystal sprites in github.com/PokeAPI/sprites).
+pret/pokeyellow, pret/pokecrystal and pret/pokeemerald disassemblies (fetched at build time by rom/build.sh,
+rom/crystal/build.sh and rom/emerald/build.sh, each pinned to one commit) plus the patches in rom/patches/,
+rom/crystal/patches/ and rom/emerald/patches/. The favicon, the social card and the small team pictures are
+generated or downloaded at build time and are not committed (the pictures come from the Yellow, Crystal and Emerald
+sprites in github.com/PokeAPI/sprites).
 
 Whoever deploys Oakle serves the ROM they built to their visitors, from their own domain. That is the deployer's
 responsibility, and a rights holder may ask for it to be taken down. Never commit a ROM, sprites, music or generated
@@ -13,6 +14,8 @@ images to this repository (scripts/prepublish-check.sh enforces this).
 
 Third-party components that ARE redistributed here:
   - binjgb (public/emu/)        MIT          LICENSES/binjgb-MIT.txt    https://github.com/binji/binjgb
+  - mGBA (public/emu/mgba.*)    MPL-2.0      https://github.com/mgba-emu/mgba (tag 0.10.5; the source, with our small
+                                             wrapper emu/mgba/shim.c, is what emu/mgba/build.sh compiles)
   - Outfit (public/fonts/)      SIL OFL 1.1  LICENSES/Outfit-OFL.txt
   - Press Start 2P (public/fonts/) SIL OFL 1.1 LICENSES/PressStart2P-OFL.txt
-Build-time tools (not redistributed): rgbds (ISC), pret/pokeyellow, pret/pokecrystal, @pkmn/sim and @pkmn/dex (MIT, dev only).
+Build-time tools (not redistributed): rgbds (ISC), Arm GNU toolchain binutils (GPL), pret/agbcc, pret/pokeyellow, pret/pokecrystal, pret/pokeemerald, @pkmn/sim and @pkmn/dex (MIT, dev only).

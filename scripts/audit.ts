@@ -7,7 +7,7 @@ import {GAME_IDS, GAMES, type Game} from '../src/games';
 import {dayId, decodeLog, patchRom, replay, romId, type Day, type Result} from '../src/rom';
 
 export type Db = {all(sql: string, params?: string[]): Promise<any[]>};
-type Deps = {site: string; fetch: typeof fetch; load: () => Promise<any>; replayFn?: typeof replay; batch?: number};
+type Deps = {site: string; fetch: typeof fetch; load: (emulator?: string) => Promise<any>; replayFn?: typeof replay; batch?: number};
 
 /** Replays pending wins; returns how many were confirmed, voided (`corrected`), or left alone (ROM changed since they were played). */
 export async function audit(db: Db, deps: Deps, log: (s: string) => void = console.log) {
@@ -48,7 +48,7 @@ async function auditGame(db: Db, g: Game, {site, fetch, load, replayFn = replay,
     const d = (await days(day)).find(x => x.day === day);
     if (events && !d) { decide('skip', null, 'no data for that day'); continue; }
     if (events && d && evidence.cfg && evidence.cfg !== (await dayId(d))) { decide('skip', null, 'the data for that day changed since it was played'); continue; }
-    const res: Result | null = events && d ? await replayFn(load, patchRom(rom, config, d, String(evidence.name ?? ''), g), events, day, g) : null;
+    const res: Result | null = events && d ? await replayFn(() => load(g.emu.global), patchRom(rom, config, d, String(evidence.name ?? ''), g), events, day, g) : null;
     if (res?.won) decide('confirm', res);
     else decide('void', res, res ? 'the replay was not a win' : 'the replay never finished');
   }

@@ -3,6 +3,7 @@
 //
 //   Oakle #12 — I beat Oak in 18 turns           (Yellow)
 //   Oakle Crystal #3 — I beat Elm in 24 turns    (Crystal)
+//   Oakle Emerald #2 — I beat Birch in 22 turns  (Emerald)
 //   🟩🟩🟨🟥⬛
 //   https://oakle.day
 import {GAMES, type Game} from './games';

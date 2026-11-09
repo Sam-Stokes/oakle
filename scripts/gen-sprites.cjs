@@ -31,13 +31,14 @@ function speciesToDex() {
 }
 
 // ---- a tiny PNG codec: indexed colour in, RGBA out
-function decodeIndexed(buf) {
-  let pos = 8, w = 0, h = 0, depth = 0, type = 0, plte = null;
+function decodeIndexed(buf, useTrns = false) {
+  let pos = 8, w = 0, h = 0, depth = 0, type = 0, plte = null, trns = null;
   const idat = [];
   while (pos < buf.length) {
     const len = buf.readUInt32BE(pos), kind = buf.toString('latin1', pos + 4, pos + 8), data = buf.subarray(pos + 8, pos + 8 + len);
     if (kind === 'IHDR') { w = data.readUInt32BE(0); h = data.readUInt32BE(4); depth = data[8]; type = data[9]; }
     if (kind === 'PLTE') plte = data;
+    if (kind === 'tRNS' && useTrns) trns = data; // Gen 3 sprites mark their background transparent this way
     if (kind === 'IDAT') idat.push(data);
     pos += 12 + len;
   }
@@ -53,7 +54,7 @@ function decodeIndexed(buf) {
     }
     for (let x = 0; x < w; x++) {
       const bit = x * depth, idx = (line[bit >> 3] >> (8 - depth - (bit & 7))) & ((1 << depth) - 1);
-      rgba.set([plte[idx * 3], plte[idx * 3 + 1], plte[idx * 3 + 2], 255], (y * w + x) * 4);
+      rgba.set([plte[idx * 3], plte[idx * 3 + 1], plte[idx * 3 + 2], trns && idx < trns.length ? trns[idx] : 255], (y * w + x) * 4);
     }
     prev = line;
   }
@@ -108,8 +109,37 @@ async function crystalSprites() {
   console.log(`gen-sprites: ${251 - failed} of 251 Crystal sprites in public/sprites/crystal${failed ? `; ${failed} could not be downloaded, the page will skip them` : ''}`);
 }
 
+// Emerald: the game's internal species ids are not the Pokedex numbers (Treecko is 277, #252), so map them through the decomp's own
+// names: SPECIES_X in species.h, NATIONAL_DEX_X in pokedex.h (one enum entry per number, in order).
+const EMERALD = path.join(__dirname, '..', 'rom', 'emerald', 'pokeemerald-pristine', 'include', 'constants');
+const EMERALD_BASE = 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-iii/emerald/';
+async function emeraldSprites() {
+  if (!fs.existsSync(path.join(EMERALD, 'species.h'))) { console.log('gen-sprites: no pokeemerald source yet, skipping Emerald (run sh rom/emerald/build.sh first)'); return; }
+  const dex = new Map();
+  let n = -1;
+  for (const l of fs.readFileSync(path.join(EMERALD, 'pokedex.h'), 'utf8').split('\n')) { const m = /^\s*NATIONAL_DEX_(\w+),/.exec(l); if (m) dex.set(m[1], ++n); }
+  const ids = new Map(); // internal id -> dex number
+  for (const l of fs.readFileSync(path.join(EMERALD, 'species.h'), 'utf8').split('\n')) { const m = /^#define SPECIES_(\w+)\s+(\d+)\s*$/.exec(l); if (m && !/^(OLD_)?UNOWN_/.test(m[1]) && dex.get(m[1]) > 0) ids.set(+m[2], dex.get(m[1])); } // Unown's 25 other letters are not teams
+  const out = path.join(__dirname, '..', 'public', 'sprites', 'emerald');
+  fs.mkdirSync(out, {recursive: true});
+  const queue = [...ids].filter(([id]) => !fs.existsSync(path.join(out, `${id}.png`)));
+  let failed = 0;
+  await Promise.all(Array.from({length: 8}, async () => {
+    for (let job; (job = queue.shift());) {
+      const [id, num] = job;
+      try {
+        const r = await fetch(`${EMERALD_BASE}${num}.png`);
+        if (!r.ok) throw new Error(String(r.status));
+        fs.writeFileSync(path.join(out, `${id}.png`), encodeRgba(decodeIndexed(Buffer.from(await r.arrayBuffer()), true)));
+      } catch { failed++; }
+    }
+  }));
+  console.log(`gen-sprites: ${ids.size - failed} of ${ids.size} Emerald sprites in public/sprites/emerald${failed ? `; ${failed} could not be downloaded, the page will skip them` : ''}`);
+}
+
 async function main() {
   await crystalSprites();
+  await emeraldSprites();
   if (!fs.existsSync(path.join(SRC, 'data', 'pokemon', 'dex_order.asm'))) { console.log('gen-sprites: no pret source yet, skipping (run npm run rom first)'); return; }
   const map = speciesToDex();
   fs.mkdirSync(OUT, {recursive: true});

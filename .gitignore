@@ -3,6 +3,7 @@ dist
 .wrangler
 *.gbc
 *.gb
+*.gba
 *.sav
 rom/pokeyellow-pristine/
 rom/work/
@@ -13,6 +14,12 @@ rom/variant/
 rom/crystal/pokecrystal-pristine/
 rom/crystal/work/
 rom/crystal/src/
+emu/mgba/src/
+emu/mgba/build/
+rom/emerald/pokeemerald-pristine/
+rom/emerald/baseline/
+rom/emerald/work/
+rom/emerald/src/
 
 # personal / local tooling and notes
 .claude/

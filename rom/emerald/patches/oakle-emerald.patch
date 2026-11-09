@@ -1,0 +1,857 @@
+diff -ruN pokeemerald-pristine/data/battle_scripts_1.s src/data/battle_scripts_1.s
+--- pokeemerald-pristine/data/battle_scripts_1.s	2026-10-02 08:02:13
++++ src/data/battle_scripts_1.s	2026-11-08 16:42:58
+@@ -2934,15 +2934,14 @@
+ 	waitstate
+ 	printstring STRINGID_TRAINER2LOSETEXT
+ BattleScript_LocalBattleWonReward::
+-	getmoneyreward
+-	printstring STRINGID_PLAYERGOTMONEY
+-	waitmessage B_WAIT_TIME_LONG
++	@ Oakle: no prize money, as in Yellow and Crystal
+ BattleScript_PayDayMoneyAndPickUpItems::
+ 	givepaydaymoney
+ 	pickup
+ 	end2
+ 
+ BattleScript_LocalBattleLost::
++	goto BattleScript_LocalBattleLostPrintTrainersWinText @ Oakle: no whiteout, the professor speaks instead
+ 	jumpifbattletype BATTLE_TYPE_DOME, BattleScript_CheckDomeDrew
+ 	jumpifbattletype BATTLE_TYPE_FRONTIER, BattleScript_LocalBattleLostPrintTrainersWinText
+ 	jumpifbattletype BATTLE_TYPE_TRAINER_HILL, BattleScript_LocalBattleLostPrintTrainersWinText
+diff -ruN pokeemerald-pristine/data/maps/EverGrandeCity_ChampionsRoom/map.json src/data/maps/EverGrandeCity_ChampionsRoom/map.json
+--- pokeemerald-pristine/data/maps/EverGrandeCity_ChampionsRoom/map.json	2026-10-02 08:02:13
++++ src/data/maps/EverGrandeCity_ChampionsRoom/map.json	2026-11-07 10:15:45
+@@ -16,7 +16,7 @@
+   "object_events": [
+     {
+       "local_id": "LOCALID_CHAMPIONS_ROOM_WALLACE",
+-      "graphics_id": "OBJ_EVENT_GFX_WALLACE",
++      "graphics_id": "OBJ_EVENT_GFX_PROF_BIRCH",
+       "x": 6,
+       "y": 5,
+       "elevation": 3,
+@@ -25,7 +25,7 @@
+       "movement_range_y": 0,
+       "trainer_type": "TRAINER_TYPE_NONE",
+       "trainer_sight_or_berry_tree_id": "0",
+-      "script": "0x0",
++      "script": "EverGrandeCity_ChampionsRoom_EventScript_Wallace",
+       "flag": "0"
+     },
+     {
+@@ -57,22 +57,7 @@
+       "flag": "FLAG_HIDE_CHAMPIONS_ROOM_BIRCH"
+     }
+   ],
+-  "warp_events": [
+-    {
+-      "x": 6,
+-      "y": 12,
+-      "elevation": 3,
+-      "dest_map": "MAP_EVER_GRANDE_CITY_HALL4",
+-      "dest_warp_id": "1"
+-    },
+-    {
+-      "x": 6,
+-      "y": 2,
+-      "elevation": 0,
+-      "dest_map": "MAP_EVER_GRANDE_CITY_HALL_OF_FAME",
+-      "dest_warp_id": "0"
+-    }
+-  ],
++  "warp_events": [],
+   "coord_events": [],
+   "bg_events": []
+ }
+diff -ruN pokeemerald-pristine/data/maps/EverGrandeCity_ChampionsRoom/scripts.inc src/data/maps/EverGrandeCity_ChampionsRoom/scripts.inc
+--- pokeemerald-pristine/data/maps/EverGrandeCity_ChampionsRoom/scripts.inc	2026-10-02 08:02:13
++++ src/data/maps/EverGrandeCity_ChampionsRoom/scripts.inc	2026-11-08 16:43:27
+@@ -20,13 +20,13 @@
+ 	map_script_2 VAR_TEMP_1, 0, EverGrandeCity_ChampionsRoom_EventScript_EnterRoom
+ 	.2byte 0
+ 
++@ Oakle: Birch stands where Wallace does. He greets the player, who can open the team screen (START) and walks up to him.
+ EverGrandeCity_ChampionsRoom_EventScript_EnterRoom::
+ 	lockall
+ 	applywaitmovement LOCALID_PLAYER, Common_Movement_WalkUp4
+-	delay 40
+-	applywaitmovement LOCALID_PLAYER, EverGrandeCity_ChampionsRoom_Movement_PlayerApproachWallace
+ 	setvar VAR_TEMP_1, 1
+-	goto EverGrandeCity_ChampionsRoom_EventScript_Wallace
++	playbgm MUS_ENCOUNTER_CHAMPION, FALSE
++	msgbox Oakle_Text_Greeting, MSGBOX_DEFAULT
+ 	releaseall
+ 	end
+ 
+@@ -35,12 +35,30 @@
+ 	walk_up
+ 	step_end
+ 
++@ (the label keeps Wallace's name: it is the one the object points to) Talking to Birch: "Show me what you've got", the battle,
++@ then nothing more: the professor has the last word inside the battle, the result is written when that text is done (battle_main.c),
++@ and the room does not come back.
+ EverGrandeCity_ChampionsRoom_EventScript_Wallace::
+-	playbgm MUS_ENCOUNTER_CHAMPION, FALSE
+-	msgbox EverGrandeCity_ChampionsRoom_Text_IntroSpeech, MSGBOX_DEFAULT
+-	trainerbattle_no_intro TRAINER_WALLACE, EverGrandeCity_ChampionsRoom_Text_Defeat
+-	goto EverGrandeCity_ChampionsRoom_EventScript_Defeated
+-	end
++	lockall
++	msgbox Oakle_Text_ShowMe, MSGBOX_DEFAULT
++	trainerbattle_no_intro TRAINER_BIRCH_1, Oakle_Text_Defeat
++	end @ the battle is the end: its last text and the result are handled in battle_main.c, and the room does not come back
++
++@ The same words as Oak's and Elm's (rom/patches/oakle.patch, rom/crystal/patches/oakle-crystal.patch), in a two-line box
++Oakle_Text_Greeting:
++	.string "BIRCH: {PLAYER}!\n"
++	.string "Prepare your team\l"
++	.string "to battle me!\p"
++	.string "Talk to me when\n"
++	.string "you are ready.$"
++
++Oakle_Text_ShowMe:
++	.string "BIRCH: Show me what you've got,\n"
++	.string "{PLAYER}!$"
++
++Oakle_Text_Defeat:
++	.string "BIRCH: Hmm! Well played,\n"
++	.string "{PLAYER}!$"
+ 
+ EverGrandeCity_ChampionsRoom_EventScript_Defeated::
+ 	playse SE_DOOR
+diff -ruN pokeemerald-pristine/include/constants/opponents.h src/include/constants/opponents.h
+--- pokeemerald-pristine/include/constants/opponents.h	2026-10-02 08:02:13
++++ src/include/constants/opponents.h	2026-11-07 09:14:31
+@@ -856,12 +856,15 @@
+ #define TRAINER_LEAF                        852
+ #define TRAINER_BRENDAN_PLACEHOLDER         853
+ #define TRAINER_MAY_PLACEHOLDER             854
++#define TRAINER_BIRCH_1                     855 // Oakle: Prof. Birch with Sceptile
++#define TRAINER_BIRCH_2                     856 // ... Blaziken
++#define TRAINER_BIRCH_3                     857 // ... Swampert
+ 
+ // NOTE: Because each Trainer uses a flag to determine when they are defeated, there is only space for 9 additional trainers before trainer flag space overflows
+ //       More space can be made by shifting flags around in constants/flags.h or changing how trainer flags are handled
+ //       MAX_TRAINERS_COUNT can be increased but will take up additional saveblock space
+ 
+-#define TRAINERS_COUNT                      855
++#define TRAINERS_COUNT                      858
+ #define MAX_TRAINERS_COUNT                  864
+ 
+ #endif  // GUARD_CONSTANTS_OPPONENTS_H
+diff -ruN pokeemerald-pristine/include/constants/trainers.h src/include/constants/trainers.h
+--- pokeemerald-pristine/include/constants/trainers.h	2026-10-02 08:02:13
++++ src/include/constants/trainers.h	2026-11-07 09:14:31
+@@ -109,6 +109,7 @@
+ #define TRAINER_PIC_LEAF                  90
+ #define TRAINER_PIC_RS_BRENDAN            91
+ #define TRAINER_PIC_RS_MAY                92
++#define TRAINER_PIC_BIRCH                 TRAINER_PIC_LEAF // Oakle: the unused Leaf slot shows Birch (the build copies his intro portrait over leaf.png)
+ 
+ // The player back pics are assumed to alternate according to the gender values (MALE/FEMALE)
+ #define TRAINER_BACK_PIC_BRENDAN                0
+@@ -351,6 +352,7 @@
+ #define TRAINER_CLASS_PIKE_QUEEN     0x3f
+ #define TRAINER_CLASS_PYRAMID_KING   0x40
+ #define TRAINER_CLASS_RS_PROTAG      0x41
++#define TRAINER_CLASS_PKMN_PROF      0x42 // Oakle
+ 
+ #define TRAINER_ENCOUNTER_MUSIC_MALE         0 // standard male encounter music
+ #define TRAINER_ENCOUNTER_MUSIC_FEMALE       1 // standard female encounter music
+diff -ruN pokeemerald-pristine/include/oakle.h src/include/oakle.h
+--- pokeemerald-pristine/include/oakle.h	1970-01-01 12:00:00
++++ src/include/oakle.h	2026-11-08 16:42:58
+@@ -0,0 +1,17 @@
++#ifndef GUARD_OAKLE_H
++#define GUARD_OAKLE_H
++
++// Oakle: one fixed battle against Prof. Birch in the Champion's room, set up from OakleConfig (the web page overwrites those bytes before boot).
++#define OAKLE_RESULT_SECTOR 31 // flash sector the result is written to (the recorded-battle sector: nothing else writes it here)
++
++void CB2_OakleBoot(void);                  // boot: straight into a new game, in Birch's room
++void OakleNewGame(void);                   // end of NewGameInitData: the player's name, options and team
++void OakleSeedDice(void);                  // the shared dice, at the moment the fight starts
++u16 OakleTrainerVariant(u16 trainerNum);   // TRAINER_BIRCH_1 becomes the day's Birch (his starter)
++void CB2_OakleHold(void);                  // after the battle: stay where we are
++void OakleRecordResult(void);              // the battle's last text is done: write the result
++
++extern const u8 gOakleDefeatText[];
++extern const u8 gOakleVictoryText[];
++
++#endif // GUARD_OAKLE_H
+diff -ruN pokeemerald-pristine/src/battle_bg.c src/src/battle_bg.c
+--- pokeemerald-pristine/src/battle_bg.c	2026-10-02 08:02:13
++++ src/src/battle_bg.c	2026-11-07 09:14:31
+@@ -795,7 +795,7 @@
+                 LoadCompressedPalette(gBattleEnvironmentPalette_BuildingLeader, BG_PLTT_ID(2), 3 * PLTT_SIZE_4BPP);
+                 return;
+             }
+-            else if (trainerClass == TRAINER_CLASS_CHAMPION)
++            else if (trainerClass == TRAINER_CLASS_CHAMPION || trainerClass == TRAINER_CLASS_PKMN_PROF)
+             {
+                 LZDecompressVram(gBattleEnvironmentTiles_Stadium, (void *)(BG_CHAR_ADDR(2)));
+                 LZDecompressVram(gBattleEnvironmentTilemap_Stadium, (void *)(BG_SCREEN_ADDR(26)));
+@@ -1185,7 +1185,7 @@
+                 LZDecompressVram(gBattleEnvironmentAnimTilemap_Building, (void *)(BG_SCREEN_ADDR(28)));
+                 return;
+             }
+-            else if (trainerClass == TRAINER_CLASS_CHAMPION)
++            else if (trainerClass == TRAINER_CLASS_CHAMPION || trainerClass == TRAINER_CLASS_PKMN_PROF)
+             {
+                 LZDecompressVram(gBattleEnvironmentAnimTiles_Building, (void *)(BG_CHAR_ADDR(1)));
+                 LZDecompressVram(gBattleEnvironmentAnimTilemap_Building, (void *)(BG_SCREEN_ADDR(28)));
+@@ -1241,7 +1241,7 @@
+                     LZDecompressVram(gBattleEnvironmentTiles_Building, (void *)(BG_CHAR_ADDR(2)));
+                     break;
+                 }
+-                else if (trainerClass == TRAINER_CLASS_CHAMPION)
++                else if (trainerClass == TRAINER_CLASS_CHAMPION || trainerClass == TRAINER_CLASS_PKMN_PROF)
+                 {
+                     LZDecompressVram(gBattleEnvironmentTiles_Stadium, (void *)(BG_CHAR_ADDR(2)));
+                     break;
+@@ -1303,7 +1303,7 @@
+                     LZDecompressVram(gBattleEnvironmentTilemap_Building, (void *)(BG_SCREEN_ADDR(26)));
+                     break;
+                 }
+-                else if (trainerClass == TRAINER_CLASS_CHAMPION)
++                else if (trainerClass == TRAINER_CLASS_CHAMPION || trainerClass == TRAINER_CLASS_PKMN_PROF)
+                 {
+                     LZDecompressVram(gBattleEnvironmentTilemap_Stadium, (void *)(BG_SCREEN_ADDR(26)));
+                     break;
+@@ -1365,7 +1365,7 @@
+                     LoadCompressedPalette(gBattleEnvironmentPalette_BuildingLeader, BG_PLTT_ID(2), 3 * PLTT_SIZE_4BPP);
+                     break;
+                 }
+-                else if (trainerClass == TRAINER_CLASS_CHAMPION)
++                else if (trainerClass == TRAINER_CLASS_CHAMPION || trainerClass == TRAINER_CLASS_PKMN_PROF)
+                 {
+                     LoadCompressedPalette(gBattleEnvironmentPalette_StadiumWallace, BG_PLTT_ID(2), 3 * PLTT_SIZE_4BPP);
+                     break;
+diff -ruN pokeemerald-pristine/src/battle_main.c src/src/battle_main.c
+--- pokeemerald-pristine/src/battle_main.c	2026-10-02 08:02:13
++++ src/src/battle_main.c	2026-11-08 16:42:58
+@@ -1,5 +1,6 @@
+ #include "global.h"
+ #include "battle.h"
++#include "oakle.h"
+ #include "battle_anim.h"
+ #include "battle_ai_script_commands.h"
+ #include "battle_arena.h"
+@@ -1967,6 +1968,7 @@
+ 
+     if (trainerNum == TRAINER_SECRET_BASE)
+         return 0;
++    trainerNum = OakleTrainerVariant(trainerNum); // Oakle: Birch with the day's starter
+ 
+     if (gBattleTypeFlags & BATTLE_TYPE_TRAINER && !(gBattleTypeFlags & (BATTLE_TYPE_FRONTIER
+                                                                         | BATTLE_TYPE_EREADER_TRAINER
+@@ -2083,9 +2085,7 @@
+ 
+ void VBlankCB_Battle(void)
+ {
+-    // Change gRngSeed every vblank unless the battle could be recorded.
+-    if (!(gBattleTypeFlags & (BATTLE_TYPE_LINK | BATTLE_TYPE_FRONTIER | BATTLE_TYPE_RECORDED)))
+-        Random();
++    // Oakle: the dice never advance with the clock in a battle (the original does this every vblank unless the battle could be recorded)
+ 
+     SetGpuReg(REG_OFFSET_BG0HOFS, gBattle_BG0_X);
+     SetGpuReg(REG_OFFSET_BG0VOFS, gBattle_BG0_Y);
+@@ -4989,6 +4989,7 @@
+         {
+         case TRAINER_CLASS_ELITE_FOUR:
+         case TRAINER_CLASS_CHAMPION:
++        case TRAINER_CLASS_PKMN_PROF:
+             PlayBGM(MUS_VICTORY_LEAGUE);
+             break;
+         case TRAINER_CLASS_TEAM_AQUA:
+@@ -5099,6 +5100,7 @@
+ {
+     if (gCurrentActionFuncId == B_ACTION_TRY_FINISH || gCurrentActionFuncId == B_ACTION_FINISHED)
+     {
++        OakleRecordResult(); // Oakle: the professor has spoken; the page shows its win or loss screen once this is written
+         if (!(gBattleTypeFlags & (BATTLE_TYPE_LINK
+                                   | BATTLE_TYPE_RECORDED_LINK
+                                   | BATTLE_TYPE_FIRST_BATTLE
+diff -ruN pokeemerald-pristine/src/battle_message.c src/src/battle_message.c
+--- pokeemerald-pristine/src/battle_message.c	2026-10-02 08:02:13
++++ src/src/battle_message.c	2026-11-08 17:05:04
+@@ -1,4 +1,5 @@
+ #include "global.h"
++#include "oakle.h"
+ #include "battle.h"
+ #include "battle_anim.h"
+ #include "battle_controllers.h"
+@@ -2622,6 +2623,11 @@
+                 else if (gBattleTypeFlags & BATTLE_TYPE_TRAINER_HILL)
+                 {
+                     CopyTrainerHillTrainerText(TRAINER_HILL_TEXT_PLAYER_LOST, gTrainerBattleOpponent_A);
++                    toCpy = gStringVar4;
++                }
++                else
++                {
++                    StringExpandPlaceholders(gStringVar4, gOakleVictoryText); // Oakle: Birch has the last word after a loss
+                     toCpy = gStringVar4;
+                 }
+                 break;
+diff -ruN pokeemerald-pristine/src/battle_setup.c src/src/battle_setup.c
+--- pokeemerald-pristine/src/battle_setup.c	2026-10-02 08:02:13
++++ src/src/battle_setup.c	2026-11-08 16:42:58
+@@ -1,6 +1,7 @@
+ #include "global.h"
+ #include "battle.h"
+ #include "battle_setup.h"
++#include "oakle.h"
+ #include "battle_transition.h"
+ #include "main.h"
+ #include "task.h"
+@@ -832,7 +833,7 @@
+         return B_TRANSITION_CHAMPION;
+     }
+ 
+-    if (gTrainers[gTrainerBattleOpponent_A].trainerClass == TRAINER_CLASS_CHAMPION)
++    if (gTrainers[gTrainerBattleOpponent_A].trainerClass == TRAINER_CLASS_CHAMPION || gTrainers[gTrainerBattleOpponent_A].trainerClass == TRAINER_CLASS_PKMN_PROF)
+         return B_TRANSITION_CHAMPION;
+ 
+     if (gTrainers[gTrainerBattleOpponent_A].trainerClass == TRAINER_CLASS_TEAM_MAGMA
+@@ -1271,6 +1272,7 @@
+ 
+ void BattleSetup_StartTrainerBattle(void)
+ {
++    OakleSeedDice(); // Oakle: the shared dice start here, not when the player happened to press A
+     if (gNoOfApproachingTrainers == 2)
+         gBattleTypeFlags = (BATTLE_TYPE_DOUBLE | BATTLE_TYPE_TWO_OPPONENTS | BATTLE_TYPE_TRAINER);
+     else
+@@ -1326,26 +1328,7 @@
+ 
+ static void CB2_EndTrainerBattle(void)
+ {
+-    if (gTrainerBattleOpponent_A == TRAINER_SECRET_BASE)
+-    {
+-        SetMainCallback2(CB2_ReturnToFieldContinueScriptPlayMapMusic);
+-    }
+-    else if (IsPlayerDefeated(gBattleOutcome) == TRUE)
+-    {
+-        if (CurrentBattlePyramidLocation() != PYRAMID_LOCATION_NONE || InTrainerHillChallenge())
+-            SetMainCallback2(CB2_ReturnToFieldContinueScriptPlayMapMusic);
+-        else
+-            SetMainCallback2(CB2_WhiteOut);
+-    }
+-    else
+-    {
+-        SetMainCallback2(CB2_ReturnToFieldContinueScriptPlayMapMusic);
+-        if (CurrentBattlePyramidLocation() == PYRAMID_LOCATION_NONE && !InTrainerHillChallenge())
+-        {
+-            RegisterTrainerInMatchCall();
+-            SetBattledTrainersFlags();
+-        }
+-    }
++    SetMainCallback2(CB2_OakleHold); // Oakle: the room is not coming back; the battle is the whole game
+ }
+ 
+ static void CB2_EndRematchBattle(void)
+@@ -1521,7 +1504,7 @@
+     if (gTrainerBattleOpponent_A == TRAINER_SECRET_BASE)
+         string = GetSecretBaseTrainerLoseText();
+     else
+-        string = sTrainerADefeatSpeech;
++        string = gOakleDefeatText; // Oakle: Birch's line
+ 
+     StringExpandPlaceholders(gStringVar4, ReturnEmptyStringIfNull(string));
+     return gStringVar4;
+@@ -1535,7 +1518,7 @@
+ 
+ const u8 *GetTrainerWonSpeech(void)
+ {
+-    return ReturnEmptyStringIfNull(sTrainerVictorySpeech);
++    return gOakleVictoryText; // Oakle
+ }
+ 
+ static const u8 *GetTrainerCantBattleSpeech(void)
+diff -ruN pokeemerald-pristine/src/battle_transition.c src/src/battle_transition.c
+--- pokeemerald-pristine/src/battle_transition.c	2026-10-02 08:02:13
++++ src/src/battle_transition.c	2026-11-07 10:37:16
+@@ -547,7 +547,7 @@
+     [MUGSHOT_PHOEBE]   = TRAINER_PIC_ELITE_FOUR_PHOEBE,
+     [MUGSHOT_GLACIA]   = TRAINER_PIC_ELITE_FOUR_GLACIA,
+     [MUGSHOT_DRAKE]    = TRAINER_PIC_ELITE_FOUR_DRAKE,
+-    [MUGSHOT_CHAMPION] = TRAINER_PIC_CHAMPION_WALLACE,
++    [MUGSHOT_CHAMPION] = TRAINER_PIC_BIRCH, // Oakle: Birch's picture, not Wallace's
+ };
+ static const s16 sMugshotsOpponentRotationScales[MUGSHOTS_COUNT][2] =
+ {
+diff -ruN pokeemerald-pristine/src/data/text/trainer_class_names.h src/src/data/text/trainer_class_names.h
+--- pokeemerald-pristine/src/data/text/trainer_class_names.h	2026-10-02 08:02:13
++++ src/src/data/text/trainer_class_names.h	2026-11-07 09:14:31
+@@ -1,4 +1,5 @@
+ const u8 gTrainerClassNames[][13] = {
++    [TRAINER_CLASS_PKMN_PROF] = _("{PKMN} PROF."),
+     [TRAINER_CLASS_PKMN_TRAINER_1] = _("{PKMN} TRAINER"),
+     [TRAINER_CLASS_PKMN_TRAINER_2] = _("{PKMN} TRAINER"),
+     [TRAINER_CLASS_HIKER] = _("HIKER"),
+diff -ruN pokeemerald-pristine/src/data/trainer_parties.h src/src/data/trainer_parties.h
+--- pokeemerald-pristine/src/data/trainer_parties.h	2026-10-02 08:02:13
++++ src/src/data/trainer_parties.h	2026-11-07 09:14:31
+@@ -12434,3 +12434,122 @@
+     .species = SPECIES_KYOGRE,
+     }
+ };
++
++// Oakle: Prof. Birch, Lv 100, IV 31, no items. Only the fourth Pokemon changes with the day (trainer 1-3).
++static const struct TrainerMonNoItemCustomMoves sParty_Birch1[] = {
++    {
++    .iv = 255,
++    .lvl = 100,
++    .species = SPECIES_GARDEVOIR,
++    .moves = {MOVE_PSYCHIC, MOVE_THUNDERBOLT, MOVE_SHADOW_BALL, MOVE_CALM_MIND}
++    },
++    {
++    .iv = 255,
++    .lvl = 100,
++    .species = SPECIES_AGGRON,
++    .moves = {MOVE_EARTHQUAKE, MOVE_IRON_TAIL, MOVE_ROCK_TOMB, MOVE_THUNDERBOLT}
++    },
++    {
++    .iv = 255,
++    .lvl = 100,
++    .species = SPECIES_FLYGON,
++    .moves = {MOVE_EARTHQUAKE, MOVE_DRAGON_CLAW, MOVE_FIRE_BLAST, MOVE_ROCK_TOMB}
++    },
++    {
++    .iv = 255,
++    .lvl = 100,
++    .species = SPECIES_SCEPTILE,
++    .moves = {MOVE_LEAF_BLADE, MOVE_EARTHQUAKE, MOVE_DRAGON_CLAW, MOVE_BRICK_BREAK}
++    },
++    {
++    .iv = 255,
++    .lvl = 100,
++    .species = SPECIES_MILOTIC,
++    .moves = {MOVE_SURF, MOVE_ICE_BEAM, MOVE_RECOVER, MOVE_TOXIC}
++    },
++    {
++    .iv = 255,
++    .lvl = 100,
++    .species = SPECIES_SALAMENCE,
++    .moves = {MOVE_DRAGON_CLAW, MOVE_FIRE_BLAST, MOVE_EARTHQUAKE, MOVE_FLY}
++    },
++};
++
++static const struct TrainerMonNoItemCustomMoves sParty_Birch2[] = {
++    {
++    .iv = 255,
++    .lvl = 100,
++    .species = SPECIES_GARDEVOIR,
++    .moves = {MOVE_PSYCHIC, MOVE_THUNDERBOLT, MOVE_SHADOW_BALL, MOVE_CALM_MIND}
++    },
++    {
++    .iv = 255,
++    .lvl = 100,
++    .species = SPECIES_AGGRON,
++    .moves = {MOVE_EARTHQUAKE, MOVE_IRON_TAIL, MOVE_ROCK_TOMB, MOVE_THUNDERBOLT}
++    },
++    {
++    .iv = 255,
++    .lvl = 100,
++    .species = SPECIES_FLYGON,
++    .moves = {MOVE_EARTHQUAKE, MOVE_DRAGON_CLAW, MOVE_FIRE_BLAST, MOVE_ROCK_TOMB}
++    },
++    {
++    .iv = 255,
++    .lvl = 100,
++    .species = SPECIES_BLAZIKEN,
++    .moves = {MOVE_BLAZE_KICK, MOVE_SKY_UPPERCUT, MOVE_EARTHQUAKE, MOVE_BRICK_BREAK}
++    },
++    {
++    .iv = 255,
++    .lvl = 100,
++    .species = SPECIES_MILOTIC,
++    .moves = {MOVE_SURF, MOVE_ICE_BEAM, MOVE_RECOVER, MOVE_TOXIC}
++    },
++    {
++    .iv = 255,
++    .lvl = 100,
++    .species = SPECIES_SALAMENCE,
++    .moves = {MOVE_DRAGON_CLAW, MOVE_FIRE_BLAST, MOVE_EARTHQUAKE, MOVE_FLY}
++    },
++};
++
++static const struct TrainerMonNoItemCustomMoves sParty_Birch3[] = {
++    {
++    .iv = 255,
++    .lvl = 100,
++    .species = SPECIES_GARDEVOIR,
++    .moves = {MOVE_PSYCHIC, MOVE_THUNDERBOLT, MOVE_SHADOW_BALL, MOVE_CALM_MIND}
++    },
++    {
++    .iv = 255,
++    .lvl = 100,
++    .species = SPECIES_AGGRON,
++    .moves = {MOVE_EARTHQUAKE, MOVE_IRON_TAIL, MOVE_ROCK_TOMB, MOVE_THUNDERBOLT}
++    },
++    {
++    .iv = 255,
++    .lvl = 100,
++    .species = SPECIES_FLYGON,
++    .moves = {MOVE_EARTHQUAKE, MOVE_DRAGON_CLAW, MOVE_FIRE_BLAST, MOVE_ROCK_TOMB}
++    },
++    {
++    .iv = 255,
++    .lvl = 100,
++    .species = SPECIES_SWAMPERT,
++    .moves = {MOVE_SURF, MOVE_EARTHQUAKE, MOVE_ICE_BEAM, MOVE_ROCK_TOMB}
++    },
++    {
++    .iv = 255,
++    .lvl = 100,
++    .species = SPECIES_MILOTIC,
++    .moves = {MOVE_SURF, MOVE_ICE_BEAM, MOVE_RECOVER, MOVE_TOXIC}
++    },
++    {
++    .iv = 255,
++    .lvl = 100,
++    .species = SPECIES_SALAMENCE,
++    .moves = {MOVE_DRAGON_CLAW, MOVE_FIRE_BLAST, MOVE_EARTHQUAKE, MOVE_FLY}
++    },
++};
++
+diff -ruN pokeemerald-pristine/src/data/trainers.h src/src/data/trainers.h
+--- pokeemerald-pristine/src/data/trainers.h	2026-10-02 08:02:13
++++ src/src/data/trainers.h	2026-11-07 09:14:31
+@@ -10260,4 +10260,40 @@
+         .aiFlags = 0,
+         .party = NO_ITEM_DEFAULT_MOVES(sParty_MayLinkPlaceholder),
+     },
++
++    [TRAINER_BIRCH_1] =
++    {
++        .trainerClass = TRAINER_CLASS_PKMN_PROF,
++        .encounterMusic_gender = TRAINER_ENCOUNTER_MUSIC_MALE,
++        .trainerPic = TRAINER_PIC_BIRCH,
++        .trainerName = _("BIRCH"),
++        .items = {},
++        .doubleBattle = FALSE,
++        .aiFlags = AI_SCRIPT_CHECK_BAD_MOVE | AI_SCRIPT_TRY_TO_FAINT | AI_SCRIPT_CHECK_VIABILITY,
++        .party = NO_ITEM_CUSTOM_MOVES(sParty_Birch1),
++    },
++
++    [TRAINER_BIRCH_2] =
++    {
++        .trainerClass = TRAINER_CLASS_PKMN_PROF,
++        .encounterMusic_gender = TRAINER_ENCOUNTER_MUSIC_MALE,
++        .trainerPic = TRAINER_PIC_BIRCH,
++        .trainerName = _("BIRCH"),
++        .items = {},
++        .doubleBattle = FALSE,
++        .aiFlags = AI_SCRIPT_CHECK_BAD_MOVE | AI_SCRIPT_TRY_TO_FAINT | AI_SCRIPT_CHECK_VIABILITY,
++        .party = NO_ITEM_CUSTOM_MOVES(sParty_Birch2),
++    },
++
++    [TRAINER_BIRCH_3] =
++    {
++        .trainerClass = TRAINER_CLASS_PKMN_PROF,
++        .encounterMusic_gender = TRAINER_ENCOUNTER_MUSIC_MALE,
++        .trainerPic = TRAINER_PIC_BIRCH,
++        .trainerName = _("BIRCH"),
++        .items = {},
++        .doubleBattle = FALSE,
++        .aiFlags = AI_SCRIPT_CHECK_BAD_MOVE | AI_SCRIPT_TRY_TO_FAINT | AI_SCRIPT_CHECK_VIABILITY,
++        .party = NO_ITEM_CUSTOM_MOVES(sParty_Birch3),
++    },
+ };
+diff -ruN pokeemerald-pristine/src/main.c src/src/main.c
+--- pokeemerald-pristine/src/main.c	2026-10-02 08:02:13
++++ src/src/main.c	2026-11-07 09:14:31
+@@ -22,6 +22,7 @@
+ #include "text.h"
+ #include "intro.h"
+ #include "main.h"
++#include "oakle.h"
+ #include "trainer_hill.h"
+ #include "constants/rgb.h"
+ 
+@@ -180,7 +181,7 @@
+     gTrainerHillVBlankCounter = NULL;
+     gMain.vblankCounter2 = 0;
+     gMain.callback1 = NULL;
+-    SetMainCallback2(CB2_InitCopyrightScreenAfterBootup);
++    SetMainCallback2(CB2_OakleBoot);
+     gSaveBlock2Ptr = &gSaveblock2.block;
+     gPokemonStoragePtr = &gPokemonStorage.block;
+ }
+@@ -362,7 +363,7 @@
+     m4aSoundMain();
+     TryReceiveLinkBattleData();
+ 
+-    if (!gMain.inBattle || !(gBattleTypeFlags & (BATTLE_TYPE_LINK | BATTLE_TYPE_FRONTIER | BATTLE_TYPE_RECORDED)))
++    if (!gMain.inBattle) // Oakle: inside the battle the dice never advance with the clock, so thinking time cannot change them
+         Random();
+ 
+     UpdateWirelessStatusIndicatorSprite();
+diff -ruN pokeemerald-pristine/src/new_game.c src/src/new_game.c
+--- pokeemerald-pristine/src/new_game.c	2026-10-02 08:02:13
++++ src/src/new_game.c	2026-11-07 10:15:22
+@@ -1,5 +1,6 @@
+ #include "global.h"
+ #include "new_game.h"
++#include "oakle.h"
+ #include "random.h"
+ #include "pokemon.h"
+ #include "roamer.h"
+@@ -126,7 +127,7 @@
+ 
+ static void WarpToTruck(void)
+ {
+-    SetWarpDestination(MAP_GROUP(MAP_INSIDE_OF_TRUCK), MAP_NUM(MAP_INSIDE_OF_TRUCK), WARP_ID_NONE, -1, -1);
++    SetWarpDestination(MAP_GROUP(MAP_EVER_GRANDE_CITY_CHAMPIONS_ROOM), MAP_NUM(MAP_EVER_GRANDE_CITY_CHAMPIONS_ROOM), WARP_ID_NONE, 6, 12); // Oakle: Birch's room, at its door
+     WarpIntoMap();
+ }
+ 
+@@ -204,6 +205,7 @@
+     WipeTrainerNameRecords();
+     ResetTrainerHillResults();
+     ResetContestLinkResults();
++    OakleNewGame(); // Oakle: the player's name and team
+ }
+ 
+ static void ResetMiniGamesRecords(void)
+diff -ruN pokeemerald-pristine/src/oakle.c src/src/oakle.c
+--- pokeemerald-pristine/src/oakle.c	1970-01-01 12:00:00
++++ src/src/oakle.c	2026-11-08 16:42:58
+@@ -0,0 +1,147 @@
++// Oakle: daily config, party setup, the fight with Prof. Birch, and the result record. The web page patches OakleConfig
++// in the ROM file before boot; everything else is the real game. No new RAM variables on purpose: gPlayerParty and friends
++// must stay where src/games.ts reads them.
++#include "global.h"
++#include "oakle.h"
++#include "agb_flash.h"
++#include "gba/m4a_internal.h"
++#include "battle.h"
++#include "battle_setup.h"
++#include "load_save.h"
++#include "malloc.h"
++#include "new_game.h"
++#include "pokemon.h"
++#include "random.h"
++#include "save.h"
++#include "sound.h"
++#include "constants/battle.h"
++#include "constants/global.h"
++#include "constants/moves.h"
++#include "constants/opponents.h"
++#include "constants/pokemon.h"
++#include "constants/species.h"
++#include "event_data.h"
++#include "constants/flags.h"
++#include "overworld.h"
++#include "main.h"
++#include "strings.h"
++
++// Byte layout (must match src/games.ts cfg and src/rom.ts patchRom):
++//   0 "OAKLE", 5 version, 6 trainer 1-3 (picks Birch's starter), 7 day (u16), 9 RNG seed (4 bytes), 13 player name (8 bytes),
++//   21 party: 6 x (species u16, move1..move4 u16, ability slot u8) = 11 bytes each
++#define CFG_TRAINER 6
++#define CFG_DAY     7
++#define CFG_RNG     9
++#define CFG_NAME    13
++#define CFG_PARTY   21
++#define CFG_ENTRY   11
++
++#define U16(v) ((v) & 0xff), ((v) >> 8)
++#define MON(species, m1, m2, m3, m4, ability) U16(species), U16(m1), U16(m2), U16(m3), U16(m4), ability
++
++const u8 OakleConfig[] = {
++    'O', 'A', 'K', 'L', 'E', 1,
++    1,                          // trainer: 1 Sceptile, 2 Blaziken, 3 Swampert
++    U16(1),                     // day
++    11, 22, 33, 44,             // RNG seed
++    0xce, 0xbf, 0xcd, 0xce, 0xff, 0xff, 0xff, 0xff, // "TEST"
++    MON(SPECIES_GARDEVOIR, MOVE_PSYCHIC, MOVE_THUNDERBOLT, MOVE_SHADOW_BALL, MOVE_CALM_MIND, 0),
++    MON(SPECIES_SNORLAX, MOVE_BODY_SLAM, MOVE_EARTHQUAKE, MOVE_HYPER_BEAM, MOVE_REST, 0),
++    MON(SPECIES_STARMIE, MOVE_SURF, MOVE_ICE_BEAM, MOVE_THUNDERBOLT, MOVE_RECOVER, 0),
++    MON(SPECIES_BLISSEY, MOVE_SOFT_BOILED, MOVE_ICE_BEAM, MOVE_THUNDERBOLT, MOVE_THUNDER_WAVE, 0),
++    MON(SPECIES_ZAPDOS, MOVE_THUNDERBOLT, MOVE_DRILL_PECK, MOVE_THUNDER_WAVE, MOVE_AGILITY, 0),
++    MON(SPECIES_MEW, MOVE_PSYCHIC, MOVE_RECOVER, MOVE_SWIFT, MOVE_REFLECT, 0),
++};
++
++// Boots straight into a new game, in place of the copyright screen, title screen and intro.
++void CB2_OakleBoot(void)
++{
++    // the same start-up the copyright screen does before the title screen
++    SetSaveBlocksPointers(GetSaveBlocksPointersBaseOffset());
++    ResetMenuAndMonGlobals();
++    Save_ResetSaveCounters();
++    LoadGameSave(SAVE_NORMAL);
++    if (gSaveFileStatus == SAVE_STATUS_EMPTY || gSaveFileStatus == SAVE_STATUS_CORRUPT)
++        Sav2_ClearSetDefault();
++    SetPokemonCryStereo(gSaveBlock2Ptr->optionsSound);
++    InitHeap(gHeap, HEAP_SIZE);
++    SetMainCallback2(CB2_NewGame); // which ends in NewGameInitData -> OakleNewGame, and the Champion's room (new_game.c)
++}
++
++// The end of NewGameInitData: who the player is and what they bring.
++void OakleNewGame(void)
++{
++    s32 i, j;
++
++    for (i = 0; i < PLAYER_NAME_LENGTH + 1; i++)
++        gSaveBlock2Ptr->playerName[i] = OakleConfig[CFG_NAME + i];
++    gSaveBlock2Ptr->playerGender = MALE;
++    // The team's OT ID is 0 (below), so the player's must be 0 too: otherwise every Pokemon counts as traded and, at Lv 100
++    // with no badges, "is loafing around" instead of obeying. (A fixed ID also keeps them from ever being shiny.)
++    for (i = 0; i < TRAINER_ID_LENGTH; i++)
++        gSaveBlock2Ptr->playerTrainerId[i] = 0;
++    gSaveBlock2Ptr->optionsTextSpeed = OPTIONS_TEXT_SPEED_FAST;
++    gSaveBlock2Ptr->optionsBattleSceneOff = FALSE;
++    gSaveBlock2Ptr->optionsBattleStyle = OPTIONS_BATTLE_STYLE_SHIFT;
++    FlagSet(FLAG_SYS_POKEMON_GET); // the START menu offers the team screen only with this
++
++    // six Lv 100 Pokemon: all IVs 31, no EVs, no items, Hardy (neutral nature), male where the species has genders, never shiny.
++    // The personality picks nature, gender and the ability slot: 225 and 250 are both multiples of 25 (Hardy), with an
++    // odd / even low bit for ability slot 1 / 0 and a high low byte (male).
++    for (i = 0; i < PARTY_SIZE; i++)
++    {
++        const u8 *e = &OakleConfig[CFG_PARTY + i * CFG_ENTRY];
++        u16 species = e[0] | (e[1] << 8);
++
++        CreateMon(&gPlayerParty[i], species, 100, 31, TRUE, e[10] ? 225 : 250, OT_ID_PRESET, 0);
++        for (j = 0; j < MAX_MON_MOVES; j++)
++            SetMonMoveSlot(&gPlayerParty[i], e[2 + j * 2] | (e[3 + j * 2] << 8), j);
++    }
++    CalculatePlayerPartyCount();
++}
++
++// The fight starts (BattleSetup_StartTrainerBattle): the shared dice, seeded only now so that the time spent in the room
++// cannot change them; from here on nothing but the battle itself advances the generator (see the VBlanks in main.c and
++// battle_main.c).
++void OakleSeedDice(void)
++{
++    gRngValue = OakleConfig[CFG_RNG] | (OakleConfig[CFG_RNG + 1] << 8) | (OakleConfig[CFG_RNG + 2] << 16) | ((u32)OakleConfig[CFG_RNG + 3] << 24);
++}
++
++// The room has one Birch (TRAINER_BIRCH_1); the day's config says which starter he brings.
++u16 OakleTrainerVariant(u16 trainerNum)
++{
++    return trainerNum == TRAINER_BIRCH_1 ? TRAINER_BIRCH_1 + OakleConfig[CFG_TRAINER] - 1 : trainerNum;
++}
++
++// What Birch says when the fight is over (battle_setup.c prints these in place of a trainer's speeches).
++const u8 gOakleDefeatText[] = _("BIRCH: Hmm! Well played,\n{PLAYER}!");
++const u8 gOakleVictoryText[] = _("BIRCH: Not yet! Try again\ntomorrow.");
++
++void CB2_OakleHold(void)
++{
++    // the battle is over and its result is written: nothing more happens (the page shows its win or loss screen)
++}
++
++// Called when the battle's own text is finished, because the page shows its result screen within half a second of this
++// appearing: "OAKLE", 1 win / 2 loss, turns, day lo, day hi, party mons still standing.
++void OakleRecordResult(void)
++{
++    u8 *b = AllocZeroed(SECTOR_SIZE);
++    u8 alive = 0;
++    s32 i;
++
++    if (b == NULL)
++        return;
++    for (i = 0; i < PARTY_SIZE; i++)
++        if (GetMonData(&gPlayerParty[i], MON_DATA_SPECIES) != SPECIES_NONE && GetMonData(&gPlayerParty[i], MON_DATA_HP) != 0)
++            alive++;
++    b[0] = 'O'; b[1] = 'A'; b[2] = 'K'; b[3] = 'L'; b[4] = 'E';
++    b[5] = gBattleOutcome == B_OUTCOME_WON ? 1 : 2;
++    b[6] = gBattleResults.battleTurnCounter;
++    b[7] = OakleConfig[CFG_DAY];
++    b[8] = OakleConfig[CFG_DAY + 1];
++    b[9] = alive;
++    ProgramFlashSectorAndVerify(OAKLE_RESULT_SECTOR, b);
++    Free(b);
++}
+diff -ruN pokeemerald-pristine/src/overworld.c src/src/overworld.c
+--- pokeemerald-pristine/src/overworld.c	2026-10-02 08:02:13
++++ src/src/overworld.c	2026-11-07 10:15:22
+@@ -1539,7 +1539,7 @@
+     PlayTimeCounter_Start();
+     ScriptContext_Init();
+     UnlockPlayerFieldControls();
+-    gFieldCallback = ExecuteTruckSequence;
++    gFieldCallback = FieldCB_DefaultWarpExit; // Oakle: no truck ride
+     gFieldCallback2 = NULL;
+     DoMapLoadLoop(&gMain.state);
+     SetFieldVBlankCallback();
+diff -ruN pokeemerald-pristine/src/party_menu.c src/src/party_menu.c
+--- pokeemerald-pristine/src/party_menu.c	2026-10-02 08:02:13
++++ src/src/party_menu.c	2026-11-07 10:15:22
+@@ -2611,28 +2611,9 @@
+     sPartyMenuInternal->numActions = 0;
+     AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, MENU_SUMMARY);
+ 
+-    // Add field moves to action list
+-    for (i = 0; i < MAX_MON_MOVES; i++)
+-    {
+-        for (j = 0; sFieldMoves[j] != FIELD_MOVES_COUNT; j++)
+-        {
+-            if (GetMonData(&mons[slotId], i + MON_DATA_MOVE1) == sFieldMoves[j])
+-            {
+-                AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, j + MENU_FIELD_MOVES);
+-                break;
+-            }
+-        }
+-    }
+-
+-    if (!InBattlePike())
+-    {
+-        if (GetMonData(&mons[1], MON_DATA_SPECIES) != SPECIES_NONE)
+-            AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, MENU_SWITCH);
+-        if (ItemIsMail(GetMonData(&mons[slotId], MON_DATA_HELD_ITEM)))
+-            AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, MENU_MAIL);
+-        else
+-            AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, MENU_ITEM);
+-    }
++    // Oakle: no field moves (Fly would leave the room) and no items: the team screen is for reading and for the order
++    if (GetMonData(&mons[1], MON_DATA_SPECIES) != SPECIES_NONE)
++        AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, MENU_SWITCH);
+     AppendToList(sPartyMenuInternal->actions, &sPartyMenuInternal->numActions, MENU_CANCEL1);
+ }
+ 
+diff -ruN pokeemerald-pristine/src/pokemon.c src/src/pokemon.c
+--- pokeemerald-pristine/src/pokemon.c	2026-10-02 08:02:13
++++ src/src/pokemon.c	2026-11-07 09:14:31
+@@ -6461,6 +6461,7 @@
+         case TRAINER_CLASS_LEADER:
+             return MUS_VS_GYM_LEADER;
+         case TRAINER_CLASS_CHAMPION:
++        case TRAINER_CLASS_PKMN_PROF:
+             return MUS_VS_CHAMPION;
+         case TRAINER_CLASS_RIVAL:
+             if (gBattleTypeFlags & BATTLE_TYPE_FRONTIER)
+diff -ruN pokeemerald-pristine/src/start_menu.c src/src/start_menu.c
+--- pokeemerald-pristine/src/start_menu.c	2026-10-02 08:02:13
++++ src/src/start_menu.c	2026-11-07 10:16:00
+@@ -314,25 +314,8 @@
+ 
+ static void BuildNormalStartMenu(void)
+ {
+-    if (FlagGet(FLAG_SYS_POKEDEX_GET) == TRUE)
+-    {
+-        AddStartMenuAction(MENU_ACTION_POKEDEX);
+-    }
+-    if (FlagGet(FLAG_SYS_POKEMON_GET) == TRUE)
+-    {
+-        AddStartMenuAction(MENU_ACTION_POKEMON);
+-    }
+-
+-    AddStartMenuAction(MENU_ACTION_BAG);
+-
+-    if (FlagGet(FLAG_SYS_POKENAV_GET) == TRUE)
+-    {
+-        AddStartMenuAction(MENU_ACTION_POKENAV);
+-    }
+-
+-    AddStartMenuAction(MENU_ACTION_PLAYER);
+-    AddStartMenuAction(MENU_ACTION_SAVE);
+-    AddStartMenuAction(MENU_ACTION_OPTION);
++    // Oakle: the team screen (to pick a lead) and nothing else: no bag, no save, no options
++    AddStartMenuAction(MENU_ACTION_POKEMON);
+     AddStartMenuAction(MENU_ACTION_EXIT);
+ }
+ 

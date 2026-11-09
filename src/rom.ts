@@ -4,18 +4,32 @@ export type Result = {won: boolean; turns: number; alive: number};
 
 import {GAMES, type Game} from './games';
 
-// ---- cartridge RAM contract with the ROM hacks (rom/src/engine/oakle/oakle_party.asm, rom/crystal/src/engine/oakle/oakle.asm)
+// ---- cartridge RAM contract with the ROM hacks (rom/src/engine/oakle/oakle_party.asm, rom/crystal/src/engine/oakle/oakle.asm, rom/emerald/src/src/oakle.c)
 // Per game (src/games.ts): config offsets, and the result block "OAKLE", 1 win/2 loss, turns, day lo, day hi, party Pokemon still standing
 
-/** Game charset: A-Z $80.., 0-9 $F6.., space $7F, "-" $E3, terminator $50. */
-const encodeName = (n: string) => {
-  const out = new Uint8Array(11).fill(0x50);
-  [...n.slice(0, 7)].forEach((c, i) => (out[i] = c >= 'A' && c <= 'Z' ? 0x80 + c.charCodeAt(0) - 65 : c >= '0' && c <= '9' ? 0xf6 + +c : c === '-' ? 0xe3 : 0x7f));
+/**
+ * Game charset. Gen 1/2: A-Z $80.., 0-9 $F6.., space $7F, "-" $E3, terminator $50, 11 bytes. Gen 3: A-Z $BB.., 0-9 $A1..,
+ * space $00, "-" $AE, terminator $FF, 8 bytes (7 characters). Names are upper case, digits, "-" and space only.
+ */
+const encodeName = (n: string, g: Game) => {
+  const gen3 = g.gen === 3;
+  const out = new Uint8Array(gen3 ? 8 : 11).fill(gen3 ? 0xff : 0x50);
+  [...n.slice(0, 7)].forEach((c, i) => {
+    const up = c >= 'A' && c <= 'Z', digit = c >= '0' && c <= '9';
+    out[i] = gen3 ? (up ? 0xbb + c.charCodeAt(0) - 65 : digit ? 0xa1 + +c : c === '-' ? 0xae : 0x00) : up ? 0x80 + c.charCodeAt(0) - 65 : digit ? 0xf6 + +c : c === '-' ? 0xe3 : 0x7f;
+  });
   return out;
 };
 
-/** The ROM reads 5 fixed 5-byte entries (species, move1..move4): a mon with fewer than 4 moves is padded with 0 (no move). */
-const partyBytes = (party: number[][]) => party.flatMap(m => [...m, 0, 0, 0, 0].slice(0, 5));
+/** Bytes per party entry in the ROM's config: Gen 1/2 species + 4 moves (5), Gen 3 species + 4 moves as 16-bit + ability slot (11). */
+export const partyStride = (g: Game) => (g.gen === 3 ? 11 : 5);
+
+/**
+ * What the ROM reads for the party: fixed-size entries. Gen 1/2: a mon with fewer than 4 moves is padded with 0 (no move).
+ * Gen 3 entries are already [species, move1..move4, ability slot]; the ids are 16-bit, little-endian.
+ */
+const partyBytes = (party: number[][], g: Game = GAMES.yellow) =>
+  g.gen === 3 ? party.flatMap(m => m.slice(0, 5).flatMap(v => [v & 255, v >> 8]).concat(m[5] ?? 0)) : party.flatMap(m => [...m, 0, 0, 0, 0].slice(0, 5));
 
 /** A copy of the ROM with the day's trainer, dice, party and the player's name written into its config block. */
 export function patchRom(rom: Uint8Array, at: number, d: Day, name: string, g: Game = GAMES.yellow) {
@@ -25,8 +39,8 @@ export function patchRom(rom: Uint8Array, at: number, d: Day, name: string, g: G
   r[at + CFG.trainer] = d.trainer;
   r[at + CFG.day] = d.day & 255; r[at + CFG.day + 1] = d.day >> 8;
   r.set(d.rng, at + CFG.rng);
-  r.set(encodeName(name), at + CFG.name);
-  r.set(partyBytes(d.party), at + CFG.party);
+  r.set(encodeName(name, g), at + CFG.name);
+  r.set(partyBytes(d.party, g), at + CFG.party);
   return r;
 }
 
@@ -38,10 +52,10 @@ export function readResult(ram: Uint8Array, day: number, g: Game = GAMES.yellow)
   return {won: ram[RESULT_AT + 5] === 1, turns: ram[RESULT_AT + 6], alive: ram[RESULT_AT + 9]};
 }
 
-/** The player's party as [hp, maxHp] pairs, read through `read` (one byte of the Game Boy's address space). */
+/** The player's party as [hp, maxHp] pairs, read through `read` (one byte of the console's address space). */
 export function readParty(read: (addr: number) => number, g: Game = GAMES.yellow): Array<[number, number]> {
   const {partyCount: PARTY_COUNT, party: PARTY, monLen: MON_LEN, hp: HP, maxHp: MAX_HP} = g.ram;
-  const word = (a: number) => (read(a) << 8) | read(a + 1);
+  const word = (a: number) => (g.ram.le ? (read(a + 1) << 8) | read(a) : (read(a) << 8) | read(a + 1));
   return Array.from({length: Math.min(read(PARTY_COUNT), 6)}, (_, i) => [word(PARTY + i * MON_LEN + HP), word(PARTY + i * MON_LEN + MAX_HP)] as [number, number]);
 }
 
@@ -49,7 +63,7 @@ export function readParty(read: (addr: number) => number, g: Game = GAMES.yellow
 export const BUTTONS = ['up', 'down', 'left', 'right', 'a', 'b', 'start', 'select'] as const;
 export type Button = (typeof BUTTONS)[number];
 export const SETTER: Record<Button, string> = {up: '_set_joyp_up', down: '_set_joyp_down', left: '_set_joyp_left', right: '_set_joyp_right', a: '_set_joyp_A', b: '_set_joyp_B', start: '_set_joyp_start', select: '_set_joyp_select'};
-export const TICKS_PER_MS = 4194.304;
+export const TICKS_PER_MS = 4194.304; // the Game Boy's; each game's own is g.emu.ms
 const MAX_EVENTS = 30_000;
 
 type Setter = (setter: string, down: boolean) => void;
@@ -116,7 +130,7 @@ export async function romId(rom: Uint8Array): Promise<string> {
 }
 
 /** Fingerprint of one day's data (trainer, dice, party): a log is only evidence against the data it was played with. */
-export const dayId = (d: {trainer: number; rng: number[]; party: number[][]}) => romId(new TextEncoder().encode(JSON.stringify([d.trainer, d.rng, d.party.map(m => partyBytes([m]))])));
+export const dayId = (d: {trainer: number; rng: number[]; party: number[][]}, g: Game = GAMES.yellow) => romId(new TextEncoder().encode(JSON.stringify([d.trainer, d.rng, d.party.map(m => partyBytes([m], g))])));
 
 // ---- replay
 const TAIL_FRAMES = 18_000; // game time allowed after the last input for the result to appear (5 minutes; real ones take ~1 s)
@@ -157,7 +171,7 @@ export async function replay(newModule: () => Promise<any>, rom: Uint8Array, log
     for (let f = 0; f <= TAIL_FRAMES; f += SLICE_FRAMES) {
       const r = readResult(ram(), day, g);
       if (r) return r;
-      runTo(ticks() + 70224 * SLICE_FRAMES);
+      runTo(ticks() + g.emu.frame * SLICE_FRAMES);
     }
     return null;
   } finally {

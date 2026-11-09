@@ -51,6 +51,30 @@ describe('dayTeam', () => {
     expect(dayTeam(9, GAMES.crystal).map(m => m.species)).not.toEqual(dayTeam(9).map(m => m.species));
     expect(dayTeam(9, GAMES.yellow)).toEqual(dayTeam(9));
   });
+  it('Emerald: 6 distinct species from all 386, 1-4 legal Gen 3 moves, an ability slot the species really has', () => {
+    const g = GAMES.emerald, v = TeamValidator.get('gen3customgame'), dex = Dex.forGen(3);
+    const seen = new Set<number>(), slots = new Set<number>();
+    for (let d = 1; d <= 300; d++) {
+      const team = dayTeam(d, g);
+      expect(new Set(team.map(m => m.species)).size).toBe(6);
+      for (const m of team) {
+        expect(m.moves.length).toBeGreaterThan(0);
+        expect(m.moves.length).toBeLessThanOrEqual(4);
+        const sp = dex.species.get(m.species);
+        seen.add(sp.num); slots.add(m.ability!);
+        expect(sp.num).toBeLessThanOrEqual(386);
+        expect(m.ability === 0 || (m.ability === 1 && !!sp.abilities['1']), `day ${d} ${m.species} slot ${m.ability}`).toBe(true);
+        for (const mv of m.moves) expect(v.checkCanLearn(dex.moves.get(mv), sp, v.allSources(sp), {} as any), `day ${d} ${m.species} ${mv}`).toBeNull();
+      }
+    }
+    expect(Math.max(...seen)).toBeGreaterThan(370); // Hoenn species show up
+    expect([...slots].sort()).toEqual([0, 1]);
+  });
+  it('adding Gen 3 left the Gen 1 and Gen 2 teams exactly as they were', () => {
+    expect(dayTeam(9, GAMES.yellow).every(m => m.ability === undefined)).toBe(true);
+    expect(dayTeam(9, GAMES.crystal).every(m => m.ability === undefined)).toBe(true);
+    expect(dayTeam(9, GAMES.emerald).map(m => m.species)).not.toEqual(dayTeam(9, GAMES.crystal).map(m => m.species));
+  });
   it('never hands out a move that does nothing against a trainer (Gen 2 list)', () => {
     const bad = new Set(['sketch', 'mirrorcoat', 'perishsong', 'destinybond', 'spite', 'sleeptalk', 'snore', 'dreameater', 'nightmare', 'conversion2', 'psychup', 'batonpass', 'transform', 'metronome', 'mimic']);
     const only = new Set(['smeargle', 'ditto', 'wobbuffet', 'unown']); // species whose whole pool is skipped: they keep it
