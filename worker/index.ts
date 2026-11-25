@@ -38,6 +38,27 @@ const TABLES = [
   `CREATE TABLE IF NOT EXISTS pairs (code TEXT PRIMARY KEY, player_id TEXT NOT NULL, expires_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS throttle (k TEXT PRIMARY KEY, w INTEGER NOT NULL, n INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS oauth_states (state TEXT PRIMARY KEY, player_id TEXT, mode TEXT NOT NULL, expires_at INTEGER NOT NULL)`,
+  // Counters and the all-time board, kept by the triggers below so reads never scan the runs tables:
+  // meta: 'trainers' and one row per game id (finished runs); ps: per game and player, wins / finished / turns summed over wins.
+  `CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, n INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS ps (game TEXT NOT NULL, player_id TEXT NOT NULL, wins INTEGER NOT NULL, played INTEGER NOT NULL, win_turns INTEGER NOT NULL, PRIMARY KEY (game, player_id))`,
+];
+// A finished run (finished_at set) counts once; any insert, update or delete of one removes its OLD contribution and adds its NEW one,
+// so the audit's void (finished_at = NULL) and turn corrections stay exact. To resync a game: DELETE FROM meta WHERE k = '<id>' (rebuilt on next cold start).
+const gone = (id: string) => `UPDATE ps SET wins = wins - COALESCE(OLD.won, 0), played = played - 1, win_turns = win_turns - CASE WHEN OLD.won = 1 THEN OLD.turns ELSE 0 END
+    WHERE game = '${id}' AND player_id = OLD.player_id AND OLD.finished_at IS NOT NULL;
+  UPDATE meta SET n = n - 1 WHERE k = '${id}' AND OLD.finished_at IS NOT NULL;`;
+const came = (id: string) => `INSERT INTO ps SELECT '${id}', NEW.player_id, COALESCE(NEW.won, 0), 1, CASE WHEN NEW.won = 1 THEN NEW.turns ELSE 0 END WHERE NEW.finished_at IS NOT NULL
+    ON CONFLICT (game, player_id) DO UPDATE SET wins = wins + excluded.wins, played = played + 1, win_turns = win_turns + excluded.win_turns;
+  UPDATE meta SET n = n + 1 WHERE k = '${id}' AND NEW.finished_at IS NOT NULL;`;
+const TRIGGERS = [
+  `CREATE TRIGGER IF NOT EXISTS players_ins AFTER INSERT ON players BEGIN UPDATE meta SET n = n + 1 WHERE k = 'trainers'; END`,
+  `CREATE TRIGGER IF NOT EXISTS players_del AFTER DELETE ON players BEGIN UPDATE meta SET n = n - 1 WHERE k = 'trainers'; END`,
+  ...GAME_IDS.flatMap(id => [
+    `CREATE TRIGGER IF NOT EXISTS ${GAMES[id].runs}_ins AFTER INSERT ON ${GAMES[id].runs} BEGIN ${came(id)} END`,
+    `CREATE TRIGGER IF NOT EXISTS ${GAMES[id].runs}_upd AFTER UPDATE OF finished_at, won, turns ON ${GAMES[id].runs} BEGIN ${gone(id)} ${came(id)} END`,
+    `CREATE TRIGGER IF NOT EXISTS ${GAMES[id].runs}_del AFTER DELETE ON ${GAMES[id].runs} BEGIN ${gone(id)} END`,
+  ]),
 ];
 const COLUMNS: [string, string][] = [['late', 'late INTEGER NOT NULL DEFAULT 0'], ['alive', 'alive INTEGER'], ['log', 'log TEXT'], ['verified', 'verified INTEGER']]; // added after launch
 const PLAYER_COLUMNS: [string, string][] = [['discord_id', 'discord_id TEXT'], ['discord_name', 'discord_name TEXT'], ['discord_member', 'discord_member INTEGER']]; // Discord link, opt-in
@@ -49,6 +70,17 @@ const ensureSchema = (db: any) => (schema ??= (async () => {
   const haveP = new Set((await db.prepare(`PRAGMA table_info(players)`).all()).results.map((c: any) => c.name));
   for (const [name, ddl] of PLAYER_COLUMNS) if (!haveP.has(name)) await db.prepare(`ALTER TABLE players ADD COLUMN ${ddl}`).run();
   await db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS players_discord ON players (discord_id) WHERE discord_id IS NOT NULL`).run();
+  // First run after this shipped (or a new game): fill the missing counters from the tables, once. Same batch as the triggers, so nothing is missed.
+  const filled = new Set((await db.prepare(`SELECT k FROM meta`).all()).results.map((c: any) => c.k));
+  const fill = [
+    ...(filled.has('trainers') ? [] : [`INSERT OR REPLACE INTO meta SELECT 'trainers', COUNT(*) FROM players`]),
+    ...GAME_IDS.filter(id => !filled.has(id)).flatMap(id => [
+      `DELETE FROM ps WHERE game = '${id}'`,
+      `INSERT INTO ps SELECT '${id}', player_id, SUM(COALESCE(won, 0)), COUNT(*), SUM(CASE WHEN won = 1 THEN turns ELSE 0 END) FROM ${GAMES[id].runs} WHERE finished_at IS NOT NULL GROUP BY player_id`,
+      `INSERT OR REPLACE INTO meta SELECT '${id}', COUNT(*) FROM ${GAMES[id].runs} WHERE finished_at IS NOT NULL`,
+    ]),
+  ];
+  await db.batch([...fill, ...TRIGGERS].map(q => db.prepare(q)));
 })().catch((e) => { schema = null; throw e; }));
 
 // Fixed-window counter per key (per IP and action): true when the caller is over the limit for this minute.
@@ -60,23 +92,45 @@ async function limited(db: any, key: string, max: number) {
 }
 const NAV_DEST = new Set(['document', 'iframe', 'frame', 'embed', 'object']);
 
-// The leaderboard scans whole tables, so requests within a few seconds share one result per day (per Worker isolate).
+// Edge cache (shared by every Worker isolate in a data centre, unlike a Map): JSON by key. Tests have no `caches`, so they just load.
+declare const caches: any;
+const edgeReq = (key: string) => new Request(`https://cache.invalid/${key}`);
+const edge = async <T>(key: string, ttl: number, load: () => Promise<T>): Promise<T> => {
+  const c = (globalThis as any).caches?.default;
+  if (!c) return load();
+  const hit = await c.match(edgeReq(key));
+  if (hit) return hit.json();
+  const v = await load();
+  await c.put(edgeReq(key), new Response(JSON.stringify(v), {headers: {'cache-control': `public, max-age=${ttl}`}}));
+  return v;
+};
+const GLOBAL_TTL_S = 300;
+const globalKey = (g: Game) => `global/${g.id}`;
+const dropGlobal = (g: Game) => (globalThis as any).caches?.default?.delete(edgeReq(globalKey(g))); // this data centre only; others expire on the TTL
+// All-time board (from the trigger-kept ps table) and every counted win, for streaks. Names come with the board: a win implies a finished run.
+const globals = (db: any, g: Game) => edge(globalKey(g), GLOBAL_TTL_S, async () => {
+  const [all, wins] = await Promise.all([
+    db.prepare(`SELECT p.id, p.name, s.wins, s.played, ROUND(1.0 * s.win_turns / NULLIF(s.wins, 0), 1) AS avgTurns
+                FROM ps s JOIN players p ON p.id = s.player_id WHERE s.game = ? AND s.played > 0
+                ORDER BY s.wins DESC, avgTurns, s.played`).bind(g.id).all(),
+    db.prepare(`SELECT player_id, day FROM ${g.runs} WHERE won = 1 AND late = 0`).all(),
+  ]);
+  return {all: all.results, wins: wins.results};
+});
+
+// The day's board comes from the day index; requests within a few seconds share one result per day (per Worker isolate).
 const boards = new Map<string, {at: number; rows: any[]}>();
 const boardRows = async (db: any, g: Game, day: number) => {
   const key = `${g.id}:${day}`;
   const hit = boards.get(key);
   if (hit && Date.now() - hit.at < BOARD_TTL_MS) return hit.rows;
-  const rows = await Promise.all([ // g.runs is one of the two fixed table names in src/games.ts, never user text
+  const [board, count, gl] = await Promise.all([ // g.runs is one of the fixed table names in src/games.ts, never user text
     db.prepare(`SELECT p.id, p.name, r.turns, r.alive, r.late FROM ${g.runs} r JOIN players p ON p.id = r.player_id
                 WHERE r.day = ? AND r.won = 1 ORDER BY r.turns, r.alive DESC, r.finished_at`).bind(day).all(),
     db.prepare(`SELECT COUNT(*) AS played, COALESCE(SUM(won), 0) AS won FROM ${g.runs} WHERE day = ? AND finished_at IS NOT NULL`).bind(day).first(),
-    db.prepare(`SELECT p.id, p.name, SUM(r.won) AS wins, COUNT(*) AS played,
-                       ROUND(AVG(CASE WHEN r.won = 1 THEN r.turns END), 1) AS avgTurns
-                FROM ${g.runs} r JOIN players p ON p.id = r.player_id WHERE r.finished_at IS NOT NULL
-                GROUP BY p.id ORDER BY wins DESC, avgTurns, played`).all(),
-    db.prepare(`SELECT player_id, day FROM ${g.runs} WHERE won = 1 AND late = 0`).all(),
-    db.prepare(`SELECT id, name FROM players`).all(),
+    globals(db, g),
   ]);
+  const rows = [board, count, {results: gl.all}, {results: gl.wins}];
   if (boards.size > 16) boards.clear(); // days are client-chosen: keep the map small
   boards.set(key, {at: Date.now(), rows});
   return rows;
@@ -243,9 +297,8 @@ export default {
       // ---- every trainer, and every finished game (archive plays included; abandoned starts are not)
       if (url.pathname === '/api/stats') {
         if (!siteStats || Date.now() - siteStats.at > STATS_TTL_MS) {
-          // g.runs is one of the fixed table names in src/games.ts, never user text
-          const all = await db.prepare(`SELECT (SELECT COUNT(*) FROM players) AS trainers, ${GAME_IDS.map(id => `(SELECT COUNT(*) FROM ${GAMES[id].runs} WHERE finished_at IS NOT NULL) AS ${id}`).join(', ')}`).first();
-          siteStats = {at: Date.now(), body: {trainers: all.trainers, games: GAME_IDS.reduce((n, id) => n + all[id], 0), ...Object.fromEntries(GAME_IDS.map(id => [id, all[id]]))}};
+          const n = Object.fromEntries((await db.prepare(`SELECT k, n FROM meta`).all()).results.map((r: any) => [r.k, r.n])); // trigger-kept counters
+          siteStats = {at: Date.now(), body: {trainers: n.trainers ?? 0, games: GAME_IDS.reduce((t, id) => t + (n[id] ?? 0), 0), ...Object.fromEntries(GAME_IDS.map(id => [id, n[id] ?? 0]))}};
         }
         return json(siteStats.body, 200, {'cache-control': 'public, max-age=10'});
       }
@@ -254,9 +307,9 @@ export default {
       if (url.pathname === '/api/leaderboard') {
         const day = Math.min(Math.max(Math.trunc(Number(url.searchParams.get('day'))) || current, 1), current);
         const id = url.searchParams.get('id') ?? '';
-        const [board, count, all, wins, names] = await boardRows(db, g, day);
+        const [board, count, all, wins] = await boardRows(db, g, day);
         const rank = (rows: any[]) => { const i = rows.findIndex(r => r.id === id); return i < 0 ? null : i + 1; };
-        const names_ = new Map<string, string>(names.results.map((p: any) => [p.id, p.name]));
+        const names_ = new Map<string, string>(all.results.map((p: any) => [p.id, p.name]));
         const st = streaks(wins.results, current);
         const streakRows = [...st].map(([pid, s]) => ({id: pid, name: names_.get(pid) ?? '?', ...s}))
           .sort((a, b) => b.current - a.current || b.best - a.best);
@@ -371,6 +424,7 @@ export default {
         const voidRun = async (evidence: string | null = null) => {
           await db.prepare(`UPDATE ${g.runs} SET verified = 3, log = ? WHERE player_id = ? AND day = ?`).bind(evidence, body.id, day).run();
           boards.clear();
+          await dropGlobal(g);
           return json({void: true});
         };
         // A battle paused overnight may be finished later: the one try is the runs row made at start, and the page voids
@@ -403,6 +457,7 @@ export default {
         await db.prepare(`UPDATE ${g.runs} SET finished_at = ?, won = ?, turns = ?, alive = ?, log = ?, verified = ? WHERE player_id = ? AND day = ?`)
           .bind(now, verdict.won ? 1 : 0, verdict.turns, verdict.alive, evidence, verified, body.id, day).run();
         boards.clear();
+        await dropGlobal(g); // so the player's own win shows in the all-time board and streaks right away
         if (verdict.won && env.DISCORD_WEBHOOK) ctx.waitUntil(announceWin(db, env, g, body.id, day, verdict, current).catch((e) => console.error('discord error', e)));
         if (env.DISCORD_RESULTS_WEBHOOK) ctx.waitUntil(postResult(db, env, g, body.id, day, verdict, body.sq).catch((e) => console.error('discord error', e)));
         if (verified === 0) ctx.waitUntil(kickAudit(env).catch((e) => console.error('audit dispatch error', e))); // audit this win now

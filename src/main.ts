@@ -795,7 +795,7 @@ async function main() {
   if (current < 1 && !TEST) {
     // before launch (Crystal): nothing to play yet
     document.title = `${gameLabel(G)}: opens ${dateOf(1)}`;
-    app.innerHTML = `<div class="soon"><h1>${esc(gameLabel(G).toUpperCase())}</h1><p>Opens ${esc(dateOf(1))}.</p><p><a href="/">All games</a></p></div>`;
+    app.innerHTML = `<div class="soon"><h1>${esc(gameLabel(G).toUpperCase())}</h1><p>Opens ${esc(dateOf(1))}.</p><p><a href="/?pick">All games</a></p></div>`;
     return;
   }
   if (G.id !== "yellow")
@@ -846,7 +846,7 @@ async function main() {
   loadStats();
   setInterval(() => {
     if (!document.hidden) loadStats();
-  }, 30_000);
+  }, 60_000);
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) loadStats();
   });
